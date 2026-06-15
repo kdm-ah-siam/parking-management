@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "raylib.h"
 #include "parking.h"
 #include "ui.h"
@@ -40,7 +41,8 @@
 // ── Screen enum ───────────────────────────────────────────────────────
 typedef enum {
     S_STARTUP, S_VIEW, S_PARK, S_REMOVE,
-    S_UPDATE,  S_SEARCH, S_SUMMARY, S_ADD, S_FILE
+    S_UPDATE,  S_SEARCH, S_SUMMARY, S_REPORTS, S_SETTINGS, S_ADD, S_FILE,
+    S_ROLE_SELECT, S_ADMIN_LOGIN
 } Screen;
 
 // ── Text field (simple char buffer) ──────────────────────────────────
@@ -75,6 +77,28 @@ static struct {
     Color msg_col;
     int   scroll;       // view-all table scroll
     int   lscroll;      // slot-list panel scroll
+
+    int  role;            // 0=none  1=user  2=admin
+    TF   f_username;      // id 11
+    TF   f_password;      // id 12  (masked display)
+    char admin_user[64];
+    char admin_pass[64];
+
+    int  report_mode;     // 0=daily  1=monthly
+    TF   f_rep_day;       // id 13
+    TF   f_rep_month;     // id 14
+    TF   f_rep_year;      // id 15
+
+    // settings screen
+    TF   f_set_user;      // id 16
+    TF   f_set_pass;      // id 17
+    TF   f_set_r0;        // id 18  small rate
+    TF   f_set_r1;        // id 19  medium rate
+    TF   f_set_r2;        // id 20  big rate
+
+    // remove confirmation
+    int  confirm_remove;
+    int  confirm_slot_id;
 } ui;
 
 // ── Get TF by id ──────────────────────────────────────────────────────
@@ -90,8 +114,37 @@ static TF *tf(int id) {
         case 8:  return &ui.f_uid;
         case 9:  return &ui.f_uplate;
         case 10: return &ui.f_utype;
+        case 11: return &ui.f_username;
+        case 12: return &ui.f_password;
+        case 13: return &ui.f_rep_day;
+        case 14: return &ui.f_rep_month;
+        case 15: return &ui.f_rep_year;
+        case 16: return &ui.f_set_user;
+        case 17: return &ui.f_set_pass;
+        case 18: return &ui.f_set_r0;
+        case 19: return &ui.f_set_r1;
+        case 20: return &ui.f_set_r2;
         default: return NULL;
     }
+}
+
+// Returns inferred size (0=small 1=medium 2=big) from type string, or -1 if unknown
+static int infer_size(const char *type) {
+    if (!type || !type[0]) return -1;
+    char low[MAX_TYPE];
+    int i;
+    for (i = 0; type[i] && i < MAX_TYPE - 1; i++)
+        low[i] = (type[i] >= 'A' && type[i] <= 'Z') ? type[i] + 32 : type[i];
+    low[i] = '\0';
+    if (strstr(low, "motorcycle") || strstr(low, "bike") ||
+        strstr(low, "moto")       || strstr(low, "scooter"))
+        return 0;
+    if (strstr(low, "truck") || strstr(low, "bus") || strstr(low, "lorry"))
+        return 2;
+    if (strstr(low, "car") || strstr(low, "sedan") ||
+        strstr(low, "suv") || strstr(low, "van"))
+        return 1;
+    return -1;
 }
 
 static void msg_set(const char *s, Color c) {
@@ -102,11 +155,12 @@ static void msg_set(const char *s, Color c) {
 // Slightly brighten a color for hover effects
 static Color brighter(Color c) {
     int d = 22;
-    return (Color){
-        c.r + d > 255 ? 255 : c.r + d,
-        c.g + d > 255 ? 255 : c.g + d,
-        c.b + d > 255 ? 255 : c.b + d, 255
-    };
+    Color out;
+    out.a = 255;
+    out.r = (c.r + d > 255) ? 255 : c.r + d;
+    out.g = (c.g + d > 255) ? 255 : c.g + d;
+    out.b = (c.b + d > 255) ? 255 : c.b + d;
+    return out;
 }
 
 // ── Handle keyboard for the active text field ─────────────────────────
@@ -136,7 +190,14 @@ static void handle_keys(void) {
 // Button — returns 1 when clicked
 static int draw_btn(Rectangle r, const char *text, Color col, Vector2 m) {
     int hover = CheckCollisionPointRec(m, r);
-    DrawRectangleRec(r, hover ? brighter(col) : col);
+    if (hover)
+    {
+        DrawRectangleRec(r, brighter(col));
+    }
+    else
+    {
+        DrawRectangleRec(r, col);
+    }
     DrawRectangleLinesEx(r, 1.0f, (Color){255, 255, 255, 20});
     int tw = MeasureText(text, 14);
     DrawText(text, (int)(r.x + (r.width - tw) / 2),
@@ -145,19 +206,46 @@ static int draw_btn(Rectangle r, const char *text, Color col, Vector2 m) {
 }
 
 // Text input box — sets ui.active when clicked, shows cursor blink
+// masked=1 renders *** instead of the real buffer (for passwords)
 static void draw_input(Rectangle r, TF *f, int id,
-                       const char *label, Vector2 m) {
+                       const char *label, Vector2 m, int masked) {
     if (CheckCollisionPointRec(m, r) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
         ui.active = id;
+    }
     int active = (ui.active == id);
-    if (label) DrawText(label, (int)r.x, (int)r.y - 18, 12, C_SUB);
-    DrawRectangleRec(r, active ? C_INP_A : C_INP);
-    DrawRectangleLinesEx(r, 1.5f,
-        active ? (Color){80, 140, 255, 255} : C_BOR);
-    DrawText(f->b, (int)r.x + 8,
+    if (label != NULL)
+    {
+        DrawText(label, (int)r.x, (int)r.y - 18, 12, C_SUB);
+    }
+    if (active)
+    {
+        DrawRectangleRec(r, C_INP_A);
+        DrawRectangleLinesEx(r, 1.5f, (Color){80, 140, 255, 255});
+    }
+    else
+    {
+        DrawRectangleRec(r, C_INP);
+        DrawRectangleLinesEx(r, 1.5f, C_BOR);
+    }
+    const char *display;
+    char stars[FLEN];
+    if (masked)
+    {
+        int len = (int)strlen(f->b);
+        for (int i = 0; i < len; i++) stars[i] = '*';
+        stars[len] = '\0';
+        display = stars;
+    }
+    else
+    {
+        display = f->b;
+    }
+    DrawText(display, (int)r.x + 8,
              (int)(r.y + (r.height - 14) / 2), 14, WHITE);
-    if (active && (int)(GetTime() * 2) % 2) {
-        int cx = (int)r.x + 8 + MeasureText(f->b, 14);
+    if (active && (int)(GetTime() * 2) % 2)
+    {
+        int cx = (int)r.x + 8 + MeasureText(display, 14);
         DrawRectangle(cx, (int)(r.y + (r.height - 14) / 2), 2, 14, WHITE);
     }
 }
@@ -189,9 +277,21 @@ static void draw_tbl_header(int x, int y, int w) {
 
 // One slot table row
 static void draw_tbl_row(int x, int y, int w, int i, int highlight) {
-    Color bg = highlight       ? (Color){90, 70, 8, 255} :
-               lot[i].occupied ? C_OCC : C_FREE;
-    if (i % 2 == 0) {   // alternating shade
+    Color bg;
+    if (highlight)
+    {
+        bg = (Color){90, 70, 8, 255};
+    }
+    else if (lot[i].occupied)
+    {
+        bg = C_OCC;
+    }
+    else
+    {
+        bg = C_FREE;
+    }
+    if (i % 2 == 0)   // alternating shade
+    {
         bg.r += 6; bg.g += 6; bg.b += 6;
     }
     DrawRectangle(x, y, w, 28, bg);
@@ -230,7 +330,18 @@ static int draw_list_row(int x, int y, int w, int i, Vector2 m) {
     Rectangle r = {x, y, w, 38};
     int hover = CheckCollisionPointRec(m, r);
     int sel   = (lot[i].id == ui.sel_slot);
-    DrawRectangleRec(r, sel ? C_BLU : hover ? C_NAV_H : C_NAV);
+    if (sel)
+    {
+        DrawRectangleRec(r, C_BLU);
+    }
+    else if (hover)
+    {
+        DrawRectangleRec(r, C_NAV_H);
+    }
+    else
+    {
+        DrawRectangleRec(r, C_NAV);
+    }
     DrawRectangle(x, y + 37, w, 1, C_BOR);
     char id_s[12]; sprintf(id_s, "Slot  %d", lot[i].id);
     DrawText(id_s, x + 10, y + 5, 14, WHITE);
@@ -256,18 +367,28 @@ static void draw_slot_list(int x, int y, int w, int h,
     Rectangle panel = {x, y + 32, w, h - 32};
     if (CheckCollisionPointRec(m, panel)) {
         float wh = GetMouseWheelMove();
-        if (wh != 0) { ui.lscroll -= (int)wh; if (ui.lscroll < 0) ui.lscroll = 0; }
+        if (wh != 0)
+        {
+            ui.lscroll -= (int)wh;
+            if (ui.lscroll < 0) ui.lscroll = 0;
+        }
     }
 
-    int count = 0, drawn = 0;
+    int count = 0;
+    int drawn = 0;
     BeginScissorMode(x, y + 32, w, h - 32);
-    for (int i = 0; i < num_slots; i++) {
-        if ( only_free &&  lot[i].occupied) continue;
-        if (!only_free && !lot[i].occupied) continue;
-        if (count++ < ui.lscroll) continue;
+    for (int i = 0; i < num_slots; i++)
+    {
+        if (only_free == 1 && lot[i].occupied == 1)  continue;
+        if (only_free == 0 && lot[i].occupied == 0)  continue;
+        if (count < ui.lscroll) { count++; continue; }
+        count++;
         if (drawn >= visible + 1) break;
         int ry = y + 32 + drawn * item_h;
-        if (draw_list_row(x, ry, w, i, m)) ui.sel_slot = lot[i].id;
+        if (draw_list_row(x, ry, w, i, m))
+        {
+            ui.sel_slot = lot[i].id;
+        }
         drawn++;
     }
     EndScissorMode();
@@ -312,30 +433,56 @@ static void draw_nav(Vector2 m) {
     const char *labels[] = {
         "View All", "Park Vehicle", "Remove Vehicle",
         "Update Info", "Search", "Summary",
-        "Add Slots", "Save / Load"
+        "Reports", "Settings", "Add Slots", "Save / Load"
     };
     Screen screens[] = {
         S_VIEW, S_PARK, S_REMOVE,
         S_UPDATE, S_SEARCH, S_SUMMARY,
-        S_ADD, S_FILE
+        S_REPORTS, S_SETTINGS, S_ADD, S_FILE
     };
 
-    for (int i = 0; i < 8; i++) {
+    int show_count = (ui.role == 2) ? 10 : 6;
+
+    for (int i = 0; i < show_count; i++) {
         Rectangle r = {5, TOP_H + 8 + i * 52, NAV_W - 10, 44};
         int active = (ui.scr == screens[i]);
         int hover  = CheckCollisionPointRec(m, r);
-        if (active) DrawRectangleRec(r, C_NAV_A);
-        else if (hover) DrawRectangleRec(r, C_NAV_H);
-        if (active) DrawRectangle(5, (int)r.y, 3, 44, (Color){120, 190, 255, 255});
-        DrawText(labels[i], 18, (int)r.y + 15, 13, active ? WHITE : C_SUB);
+        if (active)
+        {
+            DrawRectangleRec(r, C_NAV_A);
+            DrawRectangle(5, (int)r.y, 3, 44, (Color){120, 190, 255, 255});
+            DrawText(labels[i], 18, (int)r.y + 15, 13, WHITE);
+        }
+        else if (hover)
+        {
+            DrawRectangleRec(r, C_NAV_H);
+            DrawText(labels[i], 18, (int)r.y + 15, 13, C_SUB);
+        }
+        else
+        {
+            DrawText(labels[i], 18, (int)r.y + 15, 13, C_SUB);
+        }
         if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            ui.scr     = screens[i];
-            ui.active  = 0;
-            ui.sel_slot= -1;
-            ui.scroll  = 0;
-            ui.lscroll = 0;
+            ui.scr            = screens[i];
+            ui.active         = 0;
+            ui.sel_slot       = -1;
+            ui.scroll         = 0;
+            ui.lscroll        = 0;
+            ui.confirm_remove = 0;
             msg_set("", WHITE);
         }
+    }
+
+    // Logout button at the bottom of the nav
+    if (draw_btn((Rectangle){5, SCR_H - 52, NAV_W - 10, 44}, "LOGOUT", C_RED, m)) {
+        ui.role    = 0;
+        ui.started = 0;
+        ui.scr     = S_ROLE_SELECT;
+        ui.active  = 0;
+        ui.sel_slot= -1;
+        ui.scroll  = 0;
+        ui.lscroll = 0;
+        msg_set("", WHITE);
     }
 }
 
@@ -344,7 +491,6 @@ static void draw_nav(Vector2 m) {
 // ═══════════════════════════════════════════════════════════════════════
 
 static void draw_view_all(Vector2 m) {
-    (void)m;
     int x = CON_X + 10, y = CON_Y + 12, w = CON_W - 20;
     draw_heading(x, y, "All Parking Slots");
 
@@ -354,11 +500,19 @@ static void draw_view_all(Vector2 m) {
 
     // scroll with mouse wheel
     float wh = GetMouseWheelMove();
-    if (wh != 0) {
+    if (wh != 0)
+    {
         ui.scroll -= (int)wh;
-        if (ui.scroll < 0) ui.scroll = 0;
+        if (ui.scroll < 0)
+        {
+            ui.scroll = 0;
+        }
         int max_s = num_slots - visible;
-        if (ui.scroll > max_s) ui.scroll = max_s < 0 ? 0 : max_s;
+        if (max_s < 0) max_s = 0;
+        if (ui.scroll > max_s)
+        {
+            ui.scroll = max_s;
+        }
     }
 
     draw_tbl_header(x, ty, w);
@@ -374,7 +528,11 @@ static void draw_view_all(Vector2 m) {
 
     // footer
     char s[64];
-    int occ = 0; for (int i = 0; i < num_slots; i++) if (lot[i].occupied) occ++;
+    int occ = 0;
+    for (int i = 0; i < num_slots; i++)
+    {
+        if (lot[i].occupied) occ++;
+    }
     sprintf(s, "%d slots    %d occupied    %d free", num_slots, occ, num_slots - occ);
     DrawText(s, x, SCR_H - 16, 11, C_DIM);
 }
@@ -399,14 +557,18 @@ static void draw_park(Vector2 m) {
     char sel_s[24];
     if (ui.sel_slot > 0) sprintf(sel_s, "Slot  %d", ui.sel_slot);
     else                 strcpy(sel_s, "click list →");
-    DrawText(sel_s, fx + 130, fy, 13,
-             ui.sel_slot > 0 ? WHITE : C_DIM);
+    Color sel_col = (ui.sel_slot > 0) ? WHITE : C_DIM;
+    DrawText(sel_s, fx + 130, fy, 13, sel_col);
     fy += 32;
 
     draw_input((Rectangle){fx, fy + 18, 270, 32},
-               &ui.f_plate, 2, "Plate Number", m);  fy += 68;
+               &ui.f_plate, 2, "Plate Number", m, 0);  fy += 68;
     draw_input((Rectangle){fx, fy + 18, 270, 32},
-               &ui.f_type,  3, "Vehicle Type  (Car / Truck / Motorcycle)", m); fy += 68;
+               &ui.f_type,  3, "Vehicle Type  (Car / Truck / Motorcycle)", m, 0); fy += 68;
+
+    // Auto-infer size from type field; user can still override manually
+    int inf = infer_size(ui.f_type.b);
+    if (inf >= 0) ui.sel_size = inf;
 
     // Size selector
     DrawText("Vehicle Size", fx, fy, 12, C_SUB);  fy += 18;
@@ -422,7 +584,7 @@ static void draw_park(Vector2 m) {
     fy += 44;
 
     draw_input((Rectangle){fx, fy + 18, 100, 32},
-               &ui.f_entry, 4, "Entry Hour  (0-23)", m);  fy += 68;
+               &ui.f_entry, 4, "Entry Hour  (0-23)", m, 0);  fy += 68;
 
     if (draw_btn((Rectangle){fx, fy, 210, 42}, "PARK VEHICLE", C_GRN, m)) {
         char err[128] = "";
@@ -481,34 +643,65 @@ static void draw_remove(Vector2 m) {
     sprintf(line, "Entry : %02d:00", v->entry_hour);  DrawText(line, fx, fy, 14, WHITE); fy += 30;
 
     draw_input((Rectangle){fx, fy + 18, 110, 32},
-               &ui.f_exit, 5, "Exit Hour  (0-23)", m);  fy += 68;
+               &ui.f_exit, 5, "Exit Hour  (0-23)", m, 0);  fy += 68;
 
-    // Live fee preview
+    // Live fee preview using actual elapsed time (handles overnight correctly)
     if (ui.f_exit.b[0]) {
         int exit_h = atoi(ui.f_exit.b);
-        int hours  = exit_h - v->entry_hour;
+        struct tm entry_tm = {0};
+        entry_tm.tm_year  = v->entry_year - 1900;
+        entry_tm.tm_mon   = v->entry_month - 1;
+        entry_tm.tm_mday  = v->entry_day;
+        entry_tm.tm_hour  = v->entry_hour;
+        entry_tm.tm_isdst = -1;
+        time_t entry_t = mktime(&entry_tm);
+        time_t now_t = time(NULL);
+        struct tm *today = localtime(&now_t);
+        struct tm exit_tm = *today;
+        exit_tm.tm_hour  = exit_h;
+        exit_tm.tm_min   = 0;
+        exit_tm.tm_sec   = 0;
+        exit_tm.tm_isdst = -1;
+        time_t exit_t = mktime(&exit_tm);
+        int hours = (int)(difftime(exit_t, entry_t) / 3600.0);
         if (hours <= 0) hours = 1;
         double fee = calc_fee(v->size, hours);
         char preview[64];
-        sprintf(preview, "Fee preview:  %d hr  x  $%.0f  =  $%.2f",
-                hours, (v->size == 0 ? 1.0 : v->size == 1 ? 2.0 : 3.0), fee);
+        sprintf(preview, "Fee preview:  %d hr  x  $%.2f  =  $%.2f",
+                hours, fee_rates[v->size], fee);
         DrawText(preview, fx, fy, 13, (Color){255, 200, 50, 255});
         fy += 28;
     }
 
-    if (draw_btn((Rectangle){fx, fy, 225, 42}, "REMOVE VEHICLE", C_RED, m)) {
-        char err[128] = "";
-        double fee; int hours;
-        if (remove_car(ui.sel_slot, atoi(ui.f_exit.b), &fee, &hours, err)) {
-            char ok[80];
-            sprintf(ok, "Removed!  %d hr    Fee: $%.2f    Total income: $%.2f",
-                    hours, fee, income);
-            msg_set(ok, (Color){60, 220, 100, 255});
-            memset(&ui.f_exit, 0, sizeof(TF));
-            ui.sel_slot = -1;
-            ui.active   = 0;
-        } else {
-            msg_set(err, C_RED);
+    // First click arms confirmation; second click (CONFIRM) executes removal
+    if (!ui.confirm_remove || ui.confirm_slot_id != ui.sel_slot) {
+        if (draw_btn((Rectangle){fx, fy, 225, 42}, "REMOVE VEHICLE", C_RED, m)) {
+            ui.confirm_remove  = 1;
+            ui.confirm_slot_id = ui.sel_slot;
+            msg_set("", WHITE);
+        }
+    } else {
+        DrawText("Are you sure?", fx, fy - 2, 14, (Color){255, 200, 50, 255});
+        if (draw_btn((Rectangle){fx + 120, fy - 4, 110, 36}, "CONFIRM", C_RED, m)) {
+            char err[128] = "";
+            double fee; int hours;
+            if (remove_car(ui.sel_slot, atoi(ui.f_exit.b), &fee, &hours, err)) {
+                char ok[80];
+                sprintf(ok, "Removed!  %d hr    Fee: $%.2f    Total: $%.2f",
+                        hours, fee, income);
+                msg_set(ok, (Color){60, 220, 100, 255});
+                memset(&ui.f_exit, 0, sizeof(TF));
+                ui.sel_slot      = -1;
+                ui.active        = 0;
+                ui.confirm_remove = 0;
+            } else {
+                msg_set(err, C_RED);
+                ui.confirm_remove = 0;
+            }
+        }
+        if (draw_btn((Rectangle){fx + 238, fy - 4, 90, 36}, "CANCEL", C_INP, m)) {
+            ui.confirm_remove = 0;
+            msg_set("", WHITE);
         }
     }
     fy += 52;
@@ -523,7 +716,7 @@ static void draw_update(Vector2 m) {
     int x = CON_X + 20, y = CON_Y + 15;
     draw_heading(x, y, "Update Vehicle Info");  y += 40;
 
-    draw_input((Rectangle){x, y + 18, 150, 32}, &ui.f_uid, 8, "Slot ID", m);
+    draw_input((Rectangle){x, y + 18, 150, 32}, &ui.f_uid, 8, "Slot ID", m, 0);
     if (draw_btn((Rectangle){x + 160, y + 18, 90, 32}, "Load", C_BLU, m)) {
         int id  = atoi(ui.f_uid.b);
         int idx = find_slot(id);
@@ -547,8 +740,12 @@ static void draw_update(Vector2 m) {
     DrawText("Edit fields below (clear a field to keep its current value).",
              x, y, 12, C_DIM);  y += 28;
 
-    draw_input((Rectangle){x, y + 18, 270, 32}, &ui.f_uplate, 9, "Plate", m); y += 68;
-    draw_input((Rectangle){x, y + 18, 270, 32}, &ui.f_utype, 10, "Type",  m); y += 68;
+    draw_input((Rectangle){x, y + 18, 270, 32}, &ui.f_uplate, 9, "Plate", m, 0); y += 68;
+    draw_input((Rectangle){x, y + 18, 270, 32}, &ui.f_utype, 10, "Type",  m, 0); y += 68;
+
+    // Auto-infer size from updated type if user changed it
+    int upd_inf = infer_size(ui.f_utype.b);
+    if (upd_inf >= 0) ui.upd_size = upd_inf;
 
     DrawText("Size", x, y, 12, C_SUB);  y += 18;
     const char *sz[] = {"Small","Medium","Big"};
@@ -601,8 +798,9 @@ static void draw_search(Vector2 m) {
     }
     y += 50;
 
+    const char *search_label = (ui.search_mode == 0) ? "Plate Number" : "Slot ID";
     draw_input((Rectangle){x, y + 18, 300, 32}, &ui.f_search, 6,
-               ui.search_mode == 0 ? "Plate Number" : "Slot ID", m);
+               search_label, m, 0);
     y += 68;
 
     if (draw_btn((Rectangle){x, y, 130, 36}, "SEARCH", C_BLU, m)) {
@@ -629,17 +827,29 @@ static void draw_search(Vector2 m) {
 // ═══════════════════════════════════════════════════════════════════════
 
 static void draw_summary(Vector2 m) {
-    (void)m;
     int x = CON_X + 20, y = CON_Y + 20;
     draw_heading(x, y, "Summary");  y += 44;
 
-    int occ = 0, sm = 0, med = 0, big = 0;
-    for (int i = 0; i < num_slots; i++) {
-        if (!lot[i].occupied) continue;
+    int occ = 0;
+    int sm  = 0;
+    int med = 0;
+    int big = 0;
+    for (int i = 0; i < num_slots; i++)
+    {
+        if (lot[i].occupied == 0) continue;
         occ++;
-        if      (lot[i].v.size == 0) sm++;
-        else if (lot[i].v.size == 1) med++;
-        else                         big++;
+        if (lot[i].v.size == 0)
+        {
+            sm++;
+        }
+        else if (lot[i].v.size == 1)
+        {
+            med++;
+        }
+        else
+        {
+            big++;
+        }
     }
 
     char s[32];
@@ -659,9 +869,10 @@ static void draw_summary(Vector2 m) {
     sprintf(s, "Big    : %d", big); DrawText(s, x, y, 14, WHITE); y += 32;
 
     DrawText("Fee rates per hour:", x, y, 13, C_SUB); y += 24;
-    DrawText("Small  : $1.00 / hr", x, y, 13, C_DIM); y += 20;
-    DrawText("Medium : $2.00 / hr", x, y, 13, C_DIM); y += 20;
-    DrawText("Big    : $3.00 / hr", x, y, 13, C_DIM);
+    char rate_s[48];
+    sprintf(rate_s, "Small  : $%.2f / hr", fee_rates[0]); DrawText(rate_s, x, y, 13, C_DIM); y += 20;
+    sprintf(rate_s, "Medium : $%.2f / hr", fee_rates[1]); DrawText(rate_s, x, y, 13, C_DIM); y += 20;
+    sprintf(rate_s, "Big    : $%.2f / hr", fee_rates[2]); DrawText(rate_s, x, y, 13, C_DIM);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -677,7 +888,7 @@ static void draw_add_slots(Vector2 m) {
     DrawText(cur, x, y, 15, C_SUB);  y += 42;
 
     draw_input((Rectangle){x, y + 18, 170, 36}, &ui.f_addslots, 7,
-               "How many slots to add?", m);  y += 72;
+               "How many slots to add?", m, 0);  y += 72;
 
     if (draw_btn((Rectangle){x, y, 170, 42}, "ADD SLOTS", C_GRN, m)) {
         int n = atoi(ui.f_addslots.b);
@@ -715,7 +926,8 @@ static void draw_file(Vector2 m) {
         char err[128] = "";
         if (load_file(err)) {
             msg_set("Data loaded successfully!", (Color){60,220,100,255});
-            ui.scroll = ui.lscroll = 0;
+            ui.scroll  = 0;
+            ui.lscroll = 0;
         } else {
             msg_set(err, C_RED);
         }
@@ -731,7 +943,8 @@ static void draw_file(Vector2 m) {
 static void draw_startup(Vector2 m) {
     DrawRectangle(0, 0, SCR_W, SCR_H, (Color){0, 0, 0, 190});
 
-    int bw = 500, bh = ui.has_file ? 265 : 195;
+    int bh = (ui.has_file) ? 265 : 195;
+    int bw = 500;
     int bx = (SCR_W - bw) / 2, by = (SCR_H - bh) / 2;
 
     DrawRectangle(bx, by, bw, bh, C_PANEL);
@@ -748,7 +961,7 @@ static void draw_startup(Vector2 m) {
             else                  msg_set(err, C_RED);
         }
         DrawText("— or start a new lot —", bx + 150, by + 140, 12, C_DIM);
-        draw_input((Rectangle){bx+20, by+164, 165, 34}, &ui.f_start, 1, NULL, m);
+        draw_input((Rectangle){bx+20, by+164, 165, 34}, &ui.f_start, 1, NULL, m, 0);
         if (draw_btn((Rectangle){bx+194, by+164, 100, 34}, "CREATE", C_BLU, m)
             || IsKeyPressed(KEY_ENTER)) {
             int n = atoi(ui.f_start.b);
@@ -757,7 +970,7 @@ static void draw_startup(Vector2 m) {
         }
     } else {
         DrawText("Enter the parking lot size to begin:", bx+20, by+54, 13, C_SUB);
-        draw_input((Rectangle){bx+20, by+86, 200, 36}, &ui.f_start, 1, NULL, m);
+        draw_input((Rectangle){bx+20, by+86, 200, 36}, &ui.f_start, 1, NULL, m, 0);
         if (draw_btn((Rectangle){bx+228, by+86, 120, 36}, "CREATE", C_BLU, m)
             || IsKeyPressed(KEY_ENTER)) {
             int n = atoi(ui.f_start.b);
@@ -771,15 +984,337 @@ static void draw_startup(Vector2 m) {
 // ═══════════════════════════════════════════════════════════════════════
 //   PUBLIC API
 // ═══════════════════════════════════════════════════════════════════════
+//   SCREEN: REPORTS
+// ═══════════════════════════════════════════════════════════════════════
+
+static void draw_reports(Vector2 m) {
+    static struct Transaction results[MAX_REPORTS];
+    static int result_count = -1;  // -1 = not searched yet
+    static int rep_scroll   = 0;
+
+    int x = CON_X + 20, y = CON_Y + 15;
+    draw_heading(x, y, "Reports");  y += 40;
+
+    // Mode toggle
+    if (draw_btn((Rectangle){x, y, 120, 34},
+                 "DAILY", ui.report_mode == 0 ? C_BLU : C_INP, m)) {
+        ui.report_mode = 0;
+        result_count   = -1;
+    }
+    if (draw_btn((Rectangle){x + 128, y, 120, 34},
+                 "MONTHLY", ui.report_mode == 1 ? C_BLU : C_INP, m)) {
+        ui.report_mode = 1;
+        result_count   = -1;
+    }
+
+    // Date inputs
+    int dx = x + 270;
+    if (ui.report_mode == 0) {
+        draw_input((Rectangle){dx, y, 55, 34}, &ui.f_rep_day,   13, "Day",   m, 0);
+        dx += 65;
+    }
+    draw_input((Rectangle){dx, y, 60, 34}, &ui.f_rep_month, 14, "Month", m, 0);
+    dx += 70;
+    draw_input((Rectangle){dx, y, 75, 34}, &ui.f_rep_year,  15, "Year",  m, 0);
+    dx += 85;
+
+    if (draw_btn((Rectangle){dx, y, 100, 34}, "SEARCH", C_GRN, m)) {
+        int yr = atoi(ui.f_rep_year.b);
+        int mo = atoi(ui.f_rep_month.b);
+        int dy = (ui.report_mode == 0) ? atoi(ui.f_rep_day.b) : 0;
+        if (yr > 0 && mo >= 1 && mo <= 12) {
+            result_count = read_reports(yr, mo, dy, results, MAX_REPORTS);
+            rep_scroll   = 0;
+            msg_set("", WHITE);
+        } else {
+            msg_set("Invalid date — enter a valid month (1-12) and year.", C_RED);
+        }
+    }
+    dx += 108;
+    if (draw_btn((Rectangle){dx, y, 120, 34}, "EXPORT CSV",
+                 result_count > 0 ? C_BLU : C_INP, m) && result_count > 0) {
+        FILE *ef = fopen("reports_export.csv", "w");
+        if (ef) {
+            fprintf(ef, "Date,Plate,Type,Size,Entry,Exit,Hours,Fee\n");
+            for (int i = 0; i < result_count; i++) {
+                fprintf(ef, "%04d-%02d-%02d,%s,%s,%s,%02d:00,%02d:00,%d,%.2f\n",
+                        results[i].year, results[i].month, results[i].day,
+                        results[i].plate, results[i].type,
+                        SIZE_NAMES[results[i].size],
+                        results[i].entry_h, results[i].exit_h,
+                        results[i].hours, results[i].fee);
+            }
+            fclose(ef);
+            msg_set("Exported to reports_export.csv", (Color){60, 220, 100, 255});
+        } else {
+            msg_set("Could not write reports_export.csv", C_RED);
+        }
+    }
+    y += 50;
+
+    DrawText(ui.msg, x, y, 12, ui.msg_col);  y += 20;
+
+    if (result_count < 0) {
+        DrawText("Select a date and click SEARCH.", x, y + 10, 13, C_DIM);
+        return;
+    }
+
+    // Summary cards
+    double total_fee = 0;
+    for (int i = 0; i < result_count; i++) total_fee += results[i].fee;
+    double avg_fee = result_count > 0 ? total_fee / result_count : 0.0;
+
+    char sv[32];
+    sprintf(sv, "%d", result_count);
+    draw_card(x,       y, 185, 68, "CUSTOMERS", sv, C_CARD);
+    sprintf(sv, "$%.2f", total_fee);
+    draw_card(x + 195, y, 185, 68, "TOTAL FEE", sv, (Color){130, 85, 15, 255});
+    sprintf(sv, "$%.2f", avg_fee);
+    draw_card(x + 390, y, 185, 68, "AVG FEE",   sv, C_CARD);
+    y += 84;
+
+    if (result_count == 0) {
+        DrawText("No records for this period.", x, y + 10, 13, C_DIM);
+        return;
+    }
+
+    // Table header
+    int tw = CON_W - 40;
+    DrawRectangle(x, y, tw, 26, C_HEADER);
+    DrawText("Date",  x + 8,   y + 6, 12, C_SUB);
+    DrawText("Plate", x + 115, y + 6, 12, C_SUB);
+    DrawText("Type",  x + 235, y + 6, 12, C_SUB);
+    DrawText("Size",  x + 355, y + 6, 12, C_SUB);
+    DrawText("Hours", x + 435, y + 6, 12, C_SUB);
+    DrawText("Fee",   x + 515, y + 6, 12, C_SUB);
+    y += 26;
+
+    // Scrollable rows
+    int row_h  = 26;
+    int clip_h = SCR_H - y - 22;
+    int visible = clip_h / row_h;
+
+    Rectangle panel = {x, y, tw, clip_h};
+    if (CheckCollisionPointRec(m, panel)) {
+        float wh = GetMouseWheelMove();
+        if (wh != 0)
+        {
+            rep_scroll -= (int)wh;
+            if (rep_scroll < 0) rep_scroll = 0;
+            int max_s = result_count - visible;
+            if (max_s < 0) max_s = 0;
+            if (rep_scroll > max_s) rep_scroll = max_s;
+        }
+    }
+
+    BeginScissorMode(x, y, tw, clip_h);
+    for (int i = rep_scroll; i < result_count; i++) {
+        int ry = y + (i - rep_scroll) * row_h;
+        if (ry > SCR_H) break;
+        Color bg = (i % 2 == 0) ? C_PANEL : C_BG;
+        bg.r += 4; bg.g += 4; bg.b += 4;
+        DrawRectangle(x, ry, tw, row_h, bg);
+        DrawRectangle(x, ry + row_h - 1, tw, 1, (Color){20, 40, 90, 100});
+
+        char tmp[32];
+        sprintf(tmp, "%04d-%02d-%02d",
+                results[i].year, results[i].month, results[i].day);
+        DrawText(tmp, x + 8, ry + 6, 12, C_SUB);
+        DrawText(results[i].plate, x + 115, ry + 6, 12, WHITE);
+        DrawText(results[i].type,  x + 235, ry + 6, 12, C_SUB);
+        DrawText(SIZE_NAMES[results[i].size], x + 355, ry + 6, 12, C_SUB);
+        sprintf(tmp, "%d hr", results[i].hours);
+        DrawText(tmp, x + 435, ry + 6, 12, C_SUB);
+        sprintf(tmp, "$%.2f", results[i].fee);
+        DrawText(tmp, x + 515, ry + 6, 12, (Color){60, 220, 100, 255});
+    }
+    EndScissorMode();
+
+    char footer[48];
+    sprintf(footer, "%d records", result_count);
+    DrawText(footer, x, SCR_H - 16, 11, C_DIM);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   SCREEN: SETTINGS  (admin only)
+// ═══════════════════════════════════════════════════════════════════════
+
+static void save_admin_cfg(void) {
+    FILE *cf = fopen("admin.cfg", "w");
+    if (!cf) return;
+    fprintf(cf, "%s\n%s\n%.2f %.2f %.2f\n",
+            ui.admin_user, ui.admin_pass,
+            fee_rates[0], fee_rates[1], fee_rates[2]);
+    fclose(cf);
+}
+
+static void draw_settings(Vector2 m) {
+    int x = CON_X + 20, y = CON_Y + 15;
+    draw_heading(x, y, "Settings");  y += 44;
+
+    // ── Credentials ──────────────────────────────────────────────────
+    DrawText("Change Credentials", x, y, 13, C_SUB);
+    DrawRectangle(x, y + 18, 260, 1, C_BOR);  y += 28;
+
+    draw_input((Rectangle){x, y + 18, 260, 32}, &ui.f_set_user, 16, "Username", m, 0);
+    y += 68;
+    draw_input((Rectangle){x, y + 18, 260, 32}, &ui.f_set_pass, 17, "New Password", m, 1);
+    y += 68;
+
+    if (draw_btn((Rectangle){x, y, 200, 38}, "SAVE CREDENTIALS", C_GRN, m)) {
+        if (!ui.f_set_user.b[0]) {
+            msg_set("Username cannot be empty", C_RED);
+        } else {
+            strncpy(ui.admin_user, ui.f_set_user.b, 63);
+            if (ui.f_set_pass.b[0])
+                strncpy(ui.admin_pass, ui.f_set_pass.b, 63);
+            save_admin_cfg();
+            memset(&ui.f_set_pass, 0, sizeof(TF));
+            msg_set("Credentials saved.", (Color){60, 220, 100, 255});
+        }
+    }
+    y += 56;
+
+    // ── Fee Rates ─────────────────────────────────────────────────────
+    DrawText("Fee Rates  ($ per hour)", x, y, 13, C_SUB);
+    DrawRectangle(x, y + 18, 260, 1, C_BOR);  y += 28;
+
+    draw_input((Rectangle){x,       y + 18, 75, 32}, &ui.f_set_r0, 18, "Small",  m, 0);
+    draw_input((Rectangle){x + 85,  y + 18, 75, 32}, &ui.f_set_r1, 19, "Medium", m, 0);
+    draw_input((Rectangle){x + 170, y + 18, 75, 32}, &ui.f_set_r2, 20, "Big",    m, 0);
+    y += 68;
+
+    if (draw_btn((Rectangle){x, y, 160, 38}, "SAVE RATES", C_GRN, m)) {
+        double r0 = atof(ui.f_set_r0.b);
+        double r1 = atof(ui.f_set_r1.b);
+        double r2 = atof(ui.f_set_r2.b);
+        if (r0 <= 0 || r1 <= 0 || r2 <= 0) {
+            msg_set("All rates must be greater than 0", C_RED);
+        } else {
+            fee_rates[0] = r0; fee_rates[1] = r1; fee_rates[2] = r2;
+            snprintf(ui.f_set_r0.b, FLEN, "%.2f", r0);
+            snprintf(ui.f_set_r1.b, FLEN, "%.2f", r1);
+            snprintf(ui.f_set_r2.b, FLEN, "%.2f", r2);
+            save_admin_cfg();
+            msg_set("Rates saved.", (Color){60, 220, 100, 255});
+        }
+    }
+    y += 52;
+    DrawText(ui.msg, x, y, 13, ui.msg_col);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   SCREEN: ROLE SELECTION
+// ═══════════════════════════════════════════════════════════════════════
+
+static void draw_role_select(Vector2 m) {
+    DrawRectangle(0, 0, SCR_W, SCR_H, (Color){0, 0, 0, 190});
+
+    int bw = 500, bh = 180;
+    int bx = (SCR_W - bw) / 2, by = (SCR_H - bh) / 2;
+
+    DrawRectangle(bx, by, bw, bh, C_PANEL);
+    DrawRectangleLinesEx((Rectangle){bx, by, bw, bh}, 2.0f, C_BLU);
+    DrawText("PARKING MANAGEMENT SYSTEM", bx + 20, by + 16, 18, WHITE);
+    DrawRectangle(bx + 20, by + 42, bw - 40, 1, C_BOR);
+    DrawText("Please select your role to continue:", bx + 20, by + 56, 13, C_SUB);
+
+    if (draw_btn((Rectangle){bx + 20, by + 90, 215, 46}, "ADMINISTRATOR", C_BLU, m)) {
+        ui.scr    = S_ADMIN_LOGIN;
+        ui.active = 11;
+        memset(&ui.f_username, 0, sizeof(TF));
+        memset(&ui.f_password, 0, sizeof(TF));
+        msg_set("", WHITE);
+    }
+    if (draw_btn((Rectangle){bx + 265, by + 90, 215, 46}, "USER", C_GRN, m)) {
+        ui.role   = 1;
+        ui.scr    = S_STARTUP;
+        ui.active = 1;
+        msg_set("", WHITE);
+    }
+    DrawText(ui.msg, bx + 20, by + bh - 24, 12, ui.msg_col);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   SCREEN: ADMIN LOGIN
+// ═══════════════════════════════════════════════════════════════════════
+
+static void draw_admin_login(Vector2 m) {
+    DrawRectangle(0, 0, SCR_W, SCR_H, (Color){0, 0, 0, 190});
+
+    int bw = 500, bh = 250;
+    int bx = (SCR_W - bw) / 2, by = (SCR_H - bh) / 2;
+
+    DrawRectangle(bx, by, bw, bh, C_PANEL);
+    DrawRectangleLinesEx((Rectangle){bx, by, bw, bh}, 2.0f, C_BLU);
+    DrawText("PARKING MANAGEMENT SYSTEM", bx + 20, by + 16, 18, WHITE);
+    DrawRectangle(bx + 20, by + 42, bw - 40, 1, C_BOR);
+    draw_heading(bx + 20, by + 54, "Administrator Login");
+
+    draw_input((Rectangle){bx + 20, by + 100, 460, 32},
+               &ui.f_username, 11, "Username", m, 0);
+    draw_input((Rectangle){bx + 20, by + 158, 460, 32},
+               &ui.f_password, 12, "Password", m, 1);
+
+    if (draw_btn((Rectangle){bx + 20, by + 204, 205, 38}, "LOGIN", C_GRN, m)
+        || IsKeyPressed(KEY_ENTER)) {
+        if (strcmp(ui.f_username.b, ui.admin_user) == 0 &&
+            strcmp(ui.f_password.b, ui.admin_pass) == 0) {
+            ui.role   = 2;
+            ui.scr    = S_STARTUP;
+            ui.active = 1;
+            msg_set("", WHITE);
+        } else {
+            msg_set("Invalid username or password.", C_RED);
+        }
+    }
+    if (draw_btn((Rectangle){bx + 275, by + 204, 205, 38}, "BACK", C_INP, m)) {
+        ui.scr    = S_ROLE_SELECT;
+        ui.active = 0;
+        msg_set("", WHITE);
+    }
+    DrawText(ui.msg, bx + 20, by + bh - 24, 12, ui.msg_col);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   PUBLIC API
+// ═══════════════════════════════════════════════════════════════════════
 
 void ui_init(void) {
     memset(&ui, 0, sizeof(ui));
-    ui.scr        = S_STARTUP;
-    ui.active     = 1;   // focus startup input
+    ui.scr        = S_ROLE_SELECT;
+    ui.active     = 0;
     ui.sel_slot   = -1;
     ui.search_idx = -1;
     ui.upd_size   = 0;
     ui.msg_col    = WHITE;
+
+    time_t now_t = time(NULL);
+    struct tm *now_tm = localtime(&now_t);
+    snprintf(ui.f_rep_day.b,   FLEN, "%d", now_tm->tm_mday);
+    snprintf(ui.f_rep_month.b, FLEN, "%d", now_tm->tm_mon + 1);
+    snprintf(ui.f_rep_year.b,  FLEN, "%d", now_tm->tm_year + 1900);
+    ui.report_mode = 0;
+
+    FILE *cf = fopen("admin.cfg", "r");
+    if (cf) {
+        fscanf(cf, "%63s %63s", ui.admin_user, ui.admin_pass);
+        double r0, r1, r2;
+        if (fscanf(cf, "%lf %lf %lf", &r0, &r1, &r2) == 3) {
+            fee_rates[0] = r0; fee_rates[1] = r1; fee_rates[2] = r2;
+        }
+        fclose(cf);
+    } else {
+        strncpy(ui.admin_user, "admin", 63);
+        strncpy(ui.admin_pass, "1234",  63);
+        cf = fopen("admin.cfg", "w");
+        if (cf) { fprintf(cf, "admin\n1234\n1.00 2.00 3.00\n"); fclose(cf); }
+    }
+
+    snprintf(ui.f_set_user.b, FLEN, "%s", ui.admin_user);
+    snprintf(ui.f_set_r0.b,   FLEN, "%.2f", fee_rates[0]);
+    snprintf(ui.f_set_r1.b,   FLEN, "%.2f", fee_rates[1]);
+    snprintf(ui.f_set_r2.b,   FLEN, "%.2f", fee_rates[2]);
 
     FILE *f = fopen(DATA_FILE, "r");
     if (f) { fclose(f); ui.has_file = 1; }
@@ -792,6 +1327,16 @@ void ui_update(void) {
 void ui_draw(void) {
     Vector2 m = GetMousePosition();
 
+    if (ui.scr == S_ROLE_SELECT) {
+        draw_title_bar();
+        draw_role_select(m);
+        return;
+    }
+    if (ui.scr == S_ADMIN_LOGIN) {
+        draw_title_bar();
+        draw_admin_login(m);
+        return;
+    }
     if (!ui.started) {
         draw_title_bar();
         draw_startup(m);
@@ -810,7 +1355,9 @@ void ui_draw(void) {
         case S_UPDATE:  draw_update(m);     break;
         case S_SEARCH:  draw_search(m);     break;
         case S_SUMMARY: draw_summary(m);    break;
-        case S_ADD:     draw_add_slots(m);  break;
+        case S_REPORTS:  draw_reports(m);   break;
+        case S_SETTINGS: draw_settings(m); break;
+        case S_ADD:      draw_add_slots(m); break;
         case S_FILE:    draw_file(m);       break;
         default: break;
     }
