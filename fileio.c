@@ -154,3 +154,70 @@ int read_reports(int year, int month, int day,
     fclose(f);
     return count;
 }
+
+int read_reports_by_plate(const char *plate,
+                          struct Transaction *out, int max_out)
+{
+    FILE *f = fopen(REPORT_FILE, "r");
+    if (f == NULL)
+    {
+        return 0;
+    }
+
+    int count = 0;
+    char line[256];
+
+    while (fgets(line, sizeof(line), f) != NULL && count < max_out)
+    {
+        struct Transaction t;
+        char date_str[16];
+
+        int parsed = sscanf(line, "%15s %d %d %19s %19s %d %d %lf",
+                            date_str,
+                            &t.entry_h, &t.exit_h,
+                            t.plate, t.type,
+                            &t.size, &t.hours, &t.fee);
+
+        if (parsed != 8)
+        {
+            continue;
+        }
+
+        if (sscanf(date_str, "%d-%d-%d", &t.year, &t.month, &t.day) != 3)
+        {
+            continue;
+        }
+
+        // Compare plate case-insensitively
+        int match = 1;
+        int pi = 0;
+        while (plate[pi] != '\0' && t.plate[pi] != '\0')
+        {
+            char a = plate[pi];
+            char b = t.plate[pi];
+            if (a >= 'a' && a <= 'z') a = a - 32;
+            if (b >= 'a' && b <= 'z') b = b - 32;
+            if (a != b)
+            {
+                match = 0;
+                break;
+            }
+            pi++;
+        }
+        if (plate[pi] != '\0' || t.plate[pi] != '\0')
+        {
+            match = 0;
+        }
+
+        if (match == 0)
+        {
+            continue;
+        }
+
+        out[count] = t;
+        count++;
+    }
+
+    fclose(f);
+    return count;
+}

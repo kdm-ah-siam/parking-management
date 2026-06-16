@@ -76,5 +76,7 @@ int append_report(int year, int month, int day,
                   int size, int hours, double fee, char *error_message);
 int read_reports(int year, int month, int day,
                  struct Transaction *results, int max_results);
+int read_reports_by_plate(const char *plate,
+                          struct Transaction *results, int max_results);
 
 #endif

@@ -42,6 +42,7 @@
 typedef enum {
     S_STARTUP, S_VIEW, S_PARK, S_REMOVE,
     S_UPDATE,  S_SEARCH, S_SUMMARY, S_REPORTS, S_SETTINGS, S_ADD, S_FILE,
+    S_HISTORY,
     S_ROLE_SELECT, S_ADMIN_LOGIN
 } Screen;
 
@@ -96,6 +97,9 @@ static struct {
     TF   f_set_r1;        // id 19  medium rate
     TF   f_set_r2;        // id 20  big rate
 
+    // vehicle history screen
+    TF   f_hist_plate;    // id 21
+
     // remove confirmation
     int  confirm_remove;
     int  confirm_slot_id;
@@ -124,6 +128,7 @@ static TF *tf(int id) {
         case 18: return &ui.f_set_r0;
         case 19: return &ui.f_set_r1;
         case 20: return &ui.f_set_r2;
+        case 21: return &ui.f_hist_plate;
         default: return NULL;
     }
 }
@@ -433,15 +438,17 @@ static void draw_nav(Vector2 m) {
     const char *labels[] = {
         "View All", "Park Vehicle", "Remove Vehicle",
         "Update Info", "Search", "Summary",
-        "Reports", "Settings", "Add Slots", "Save / Load"
+        "Reports", "Settings", "Add Slots", "Save / Load",
+        "Veh. History"
     };
     Screen screens[] = {
         S_VIEW, S_PARK, S_REMOVE,
         S_UPDATE, S_SEARCH, S_SUMMARY,
-        S_REPORTS, S_SETTINGS, S_ADD, S_FILE
+        S_REPORTS, S_SETTINGS, S_ADD, S_FILE,
+        S_HISTORY
     };
 
-    int show_count = (ui.role == 2) ? 10 : 6;
+    int show_count = (ui.role == 2) ? 11 : 6;
 
     for (int i = 0; i < show_count; i++) {
         Rectangle r = {5, TOP_H + 8 + i * 52, NAV_W - 10, 44};
@@ -1324,6 +1331,135 @@ void ui_update(void) {
     handle_keys();
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//   SCREEN: VEHICLE HISTORY  (admin only)
+// ═══════════════════════════════════════════════════════════════════════
+
+static void draw_history(Vector2 m) {
+    static struct Transaction results[MAX_REPORTS];
+    static int result_count = -1;
+    static int hist_scroll  = 0;
+
+    int x = CON_X + 20, y = CON_Y + 15;
+    draw_heading(x, y, "Vehicle History");  y += 40;
+
+    draw_input((Rectangle){x, y, 220, 34}, &ui.f_hist_plate, 21, "Plate Number", m, 0);
+
+    if (draw_btn((Rectangle){x + 228, y, 100, 34}, "SEARCH", C_GRN, m)) {
+        if (ui.f_hist_plate.b[0] == '\0')
+        {
+            msg_set("Enter a plate number to search.", C_YEL);
+            result_count = -1;
+        }
+        else
+        {
+            result_count = read_reports_by_plate(ui.f_hist_plate.b,
+                                                 results, MAX_REPORTS);
+            hist_scroll  = 0;
+            msg_set("", WHITE);
+        }
+    }
+
+    if (draw_btn((Rectangle){x + 336, y, 80, 34}, "CLEAR", C_INP, m)) {
+        ui.f_hist_plate.b[0] = '\0';
+        result_count = -1;
+        hist_scroll  = 0;
+        msg_set("", WHITE);
+    }
+
+    y += 50;
+    DrawText(ui.msg, x, y, 12, ui.msg_col);  y += 20;
+
+    if (result_count < 0) {
+        DrawText("Search a plate to see its parking history.", x, y + 10, 13, C_DIM);
+        return;
+    }
+
+    // Summary cards
+    double total_fee  = 0;
+    int    total_hours = 0;
+    for (int i = 0; i < result_count; i++)
+    {
+        total_fee   = total_fee + results[i].fee;
+        total_hours = total_hours + results[i].hours;
+    }
+
+    char sv[32];
+    sprintf(sv, "%d", result_count);
+    draw_card(x,       y, 185, 68, "TOTAL VISITS", sv, C_CARD);
+    sprintf(sv, "$%.2f", total_fee);
+    draw_card(x + 195, y, 185, 68, "TOTAL PAID",   sv, (Color){130, 85, 15, 255});
+    sprintf(sv, "%d hr", total_hours);
+    draw_card(x + 390, y, 185, 68, "TOTAL HOURS",  sv, C_CARD);
+    y += 84;
+
+    if (result_count == 0) {
+        DrawText("No records found for this plate.", x, y + 10, 13, C_DIM);
+        return;
+    }
+
+    // Table header
+    int tw = CON_W - 40;
+    DrawRectangle(x, y, tw, 26, C_HEADER);
+    DrawText("Date",    x + 8,   y + 6, 12, C_SUB);
+    DrawText("Type",    x + 115, y + 6, 12, C_SUB);
+    DrawText("Size",    x + 235, y + 6, 12, C_SUB);
+    DrawText("Entry",   x + 330, y + 6, 12, C_SUB);
+    DrawText("Exit",    x + 410, y + 6, 12, C_SUB);
+    DrawText("Hours",   x + 490, y + 6, 12, C_SUB);
+    DrawText("Fee",     x + 570, y + 6, 12, C_SUB);
+    y += 26;
+
+    int row_h  = 26;
+    int clip_h = SCR_H - y - 22;
+    int visible = clip_h / row_h;
+
+    Rectangle panel = {x, y, tw, clip_h};
+    if (CheckCollisionPointRec(m, panel)) {
+        float wh = GetMouseWheelMove();
+        if (wh != 0)
+        {
+            hist_scroll = hist_scroll - (int)wh;
+            if (hist_scroll < 0) hist_scroll = 0;
+            int max_s = result_count - visible;
+            if (max_s < 0) max_s = 0;
+            if (hist_scroll > max_s) hist_scroll = max_s;
+        }
+    }
+
+    BeginScissorMode(x, y, tw, clip_h);
+    for (int i = hist_scroll; i < result_count; i++) {
+        int ry = y + (i - hist_scroll) * row_h;
+        if (ry > SCR_H) break;
+        Color bg = (i % 2 == 0) ? C_PANEL : C_BG;
+        bg.r = bg.r + 4;
+        bg.g = bg.g + 4;
+        bg.b = bg.b + 4;
+        DrawRectangle(x, ry, tw, row_h, bg);
+        DrawRectangle(x, ry + row_h - 1, tw, 1, (Color){20, 40, 90, 100});
+
+        char tmp[32];
+        sprintf(tmp, "%04d-%02d-%02d",
+                results[i].year, results[i].month, results[i].day);
+        DrawText(tmp,                          x + 8,   ry + 6, 12, C_SUB);
+        DrawText(results[i].type,              x + 115, ry + 6, 12, C_SUB);
+        DrawText(SIZE_NAMES[results[i].size],  x + 235, ry + 6, 12, C_SUB);
+        sprintf(tmp, "%02d:00", results[i].entry_h);
+        DrawText(tmp,                          x + 330, ry + 6, 12, C_SUB);
+        sprintf(tmp, "%02d:00", results[i].exit_h);
+        DrawText(tmp,                          x + 410, ry + 6, 12, C_SUB);
+        sprintf(tmp, "%d hr", results[i].hours);
+        DrawText(tmp,                          x + 490, ry + 6, 12, C_SUB);
+        sprintf(tmp, "$%.2f", results[i].fee);
+        DrawText(tmp,                          x + 570, ry + 6, 12, (Color){60, 220, 100, 255});
+    }
+    EndScissorMode();
+
+    char footer[48];
+    sprintf(footer, "%d records", result_count);
+    DrawText(footer, x, SCR_H - 16, 11, C_DIM);
+}
+
 void ui_draw(void) {
     Vector2 m = GetMousePosition();
 
@@ -1357,8 +1493,9 @@ void ui_draw(void) {
         case S_SUMMARY: draw_summary(m);    break;
         case S_REPORTS:  draw_reports(m);   break;
         case S_SETTINGS: draw_settings(m); break;
-        case S_ADD:      draw_add_slots(m); break;
-        case S_FILE:    draw_file(m);       break;
+        case S_ADD:      draw_add_slots(m);  break;
+        case S_FILE:     draw_file(m);      break;
+        case S_HISTORY:  draw_history(m);   break;
         default: break;
     }
 }
