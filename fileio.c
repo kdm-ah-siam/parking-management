@@ -37,7 +37,7 @@ int load_file(char *err) {
         lot[i].id = id;
         lot[i].occupied = occ;
         if (occ)
-            fscanf(f, " %s %s %d %d %d %d %d %d",
+            fscanf(f, " %19s %19s %d %d %d %d %d %d",
                    lot[i].v.plate, lot[i].v.type, &lot[i].v.size,
                    &lot[i].v.entry_hour, &lot[i].v.exit_hour,
                    &lot[i].v.entry_day, &lot[i].v.entry_month, &lot[i].v.entry_year);

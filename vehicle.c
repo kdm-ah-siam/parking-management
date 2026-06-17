@@ -9,22 +9,29 @@ double calc_fee(int size, int hours) {
     return hours * fee_rates[size];
 }
 
+// uppercase + validate: only letters, digits, hyphens allowed
+static int normalize_plate(const char *in, char *out) {
+    int j;
+    for (j = 0; in[j] && j < MAX_PLATE - 1; j++) {
+        char c = in[j];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-')) return 0;
+        out[j] = c;
+    }
+    out[j] = '\0';
+    return 1;
+}
+
 int park_car(int slot_id, const char *plate, const char *type,
              int size, int entry, char *err) {
     if (!plate || !plate[0])     { strcpy(err, "Plate is empty");          return 0; }
     if (size < 0 || size > 2)    { strcpy(err, "Pick a size");             return 0; }
     if (entry < 0 || entry > 23) { strcpy(err, "Entry hour must be 0-23"); return 0; }
 
-    // uppercase the plate and reject invalid characters
     char up[MAX_PLATE] = {0};
-    for (int j = 0; plate[j] && j < MAX_PLATE - 1; j++) {
-        char c = plate[j];
-        if (c >= 'a' && c <= 'z') c -= 32;
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-')) {
-            strcpy(err, "Plate: letters, numbers, hyphens only");
-            return 0;
-        }
-        up[j] = c;
+    if (!normalize_plate(plate, up)) {
+        strcpy(err, "Plate: letters, numbers, hyphens only");
+        return 0;
     }
 
     int i = find_slot(slot_id);
@@ -64,14 +71,12 @@ int remove_car(int slot_id, int exit_h, double *fee_out, int *hours_out, char *e
     t.tm_isdst = -1;
     time_t entry_t = mktime(&t);
 
-    // build exit timestamp (today's date at exit_h)
+    // copy localtime result immediately — mktime() below may overwrite the static buffer
     time_t now_t = time(NULL);
-    struct tm *today = localtime(&now_t);
-    t = *today;
-    t.tm_hour  = exit_h;
-    t.tm_min   = 0;
-    t.tm_sec   = 0;
-    t.tm_isdst = -1;
+    struct tm today = *localtime(&now_t);
+
+    t = today;
+    t.tm_hour = exit_h; t.tm_min = 0; t.tm_sec = 0; t.tm_isdst = -1;
     time_t exit_t = mktime(&t);
 
     int hours = (int)(difftime(exit_t, entry_t) / 3600.0);
@@ -83,7 +88,7 @@ int remove_car(int slot_id, int exit_h, double *fee_out, int *hours_out, char *e
     income    += fee;
 
     char rerr[128] = "";
-    append_report(today->tm_year + 1900, today->tm_mon + 1, today->tm_mday,
+    append_report(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday,
                   v->entry_hour, exit_h, v->plate, v->type, v->size, hours, fee, rerr);
 
     memset(v, 0, sizeof(struct Vehicle));
@@ -98,8 +103,13 @@ int update_car(int slot_id, const char *plate, const char *type, int size, char 
     if (!lot[i].occupied) { strcpy(err, "Slot is empty");  return 0; }
 
     if (plate && plate[0] && strcmp(plate, lot[i].v.plate) != 0) {
-        if (find_plate(plate) >= 0) { strcpy(err, "Plate already in use"); return 0; }
-        strncpy(lot[i].v.plate, plate, MAX_PLATE - 1);
+        char up[MAX_PLATE] = {0};
+        if (!normalize_plate(plate, up)) {
+            strcpy(err, "Plate: letters, numbers, hyphens only");
+            return 0;
+        }
+        if (find_plate(up) >= 0) { strcpy(err, "Plate already in use"); return 0; }
+        strncpy(lot[i].v.plate, up, MAX_PLATE - 1);
     }
     if (type && type[0]) strncpy(lot[i].v.type, type, MAX_TYPE - 1);
     if (size >= 0 && size <= 2) lot[i].v.size = size;

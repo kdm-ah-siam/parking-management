@@ -23,7 +23,9 @@ void init_lot(int n) {
 void add_slots_n(int n) {
     if (n <= 0) return;
     int total = num_slots + n;
-    lot = realloc(lot, total * sizeof(struct Slot));
+    struct Slot *tmp = realloc(lot, total * sizeof(struct Slot));
+    if (!tmp) return;   // out of memory — keep existing lot unchanged
+    lot = tmp;
     for (int i = num_slots; i < total; i++) {
         memset(&lot[i], 0, sizeof(struct Slot));
         lot[i].id = i + 1;
@@ -38,8 +40,12 @@ int find_slot(int id) {
     return -1;
 }
 
+// case-insensitive: stored plates are always uppercase, input may not be
 int find_plate(const char *plate) {
+    char up[MAX_PLATE] = {0};
+    for (int i = 0; plate[i] && i < MAX_PLATE - 1; i++)
+        up[i] = (plate[i] >= 'a' && plate[i] <= 'z') ? plate[i] - 32 : plate[i];
     for (int i = 0; i < num_slots; i++)
-        if (lot[i].occupied && strcmp(lot[i].v.plate, plate) == 0) return i;
+        if (lot[i].occupied && strcmp(lot[i].v.plate, up) == 0) return i;
     return -1;
 }

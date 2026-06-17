@@ -33,6 +33,8 @@
 #define C_CARD    (Color){ 18,  32,  78, 255}
 #define C_OCC     (Color){ 65,  10,  10, 255}
 #define C_FREE    (Color){  8,  48,  22, 255}
+#define C_INP     (Color){ 18,  32,  72, 255}
+#define C_INP_A   (Color){ 24,  46, 110, 255}
 #define C_BLU     (Color){ 32,  80, 200, 255}
 #define C_GRN     (Color){ 22, 140,  50, 255}
 #define C_RED     (Color){165,  28,  28, 255}
@@ -126,6 +128,59 @@ static void inp(Rectangle r, char *buf, int id, const char *label) {
     if (label) DrawText(label, (int)r.x, (int)r.y - 16, 12, C_SUB);
     if (GuiTextBox(r, buf, FLEN, ui.active == id))
         ui.active = ui.active == id ? 0 : id;
+}
+
+// same as inp() but displays **** instead of real characters
+static void masked_inp(Rectangle r, char *buf, int id, const char *label) {
+    if (label) DrawText(label, (int)r.x, (int)r.y - 16, 12, C_SUB);
+
+    // click to activate
+    if (CheckCollisionPointRec(GetMousePosition(), r) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        ui.active = id;
+
+    int active = (ui.active == id);
+
+    // draw box to match raygui textbox style
+    DrawRectangleRec(r, active ? C_INP_A : C_INP);
+    DrawRectangleLinesEx(r, 1.5f, active ? (Color){80, 140, 255, 255} : C_BOR);
+
+    // show stars instead of real text
+    int len = (int)strlen(buf);
+    char stars[FLEN];
+    for (int i = 0; i < len; i++) stars[i] = '*';
+    stars[len] = '\0';
+    DrawText(stars, (int)r.x + 8, (int)(r.y + (r.height - 14) / 2), 14, WHITE);
+
+    // blinking cursor
+    if (active && (int)(GetTime() * 2) % 2) {
+        int cx = (int)r.x + 8 + MeasureText(stars, 14);
+        DrawRectangle(cx, (int)(r.y + (r.height - 14) / 2), 2, 14, WHITE);
+    }
+
+    // handle keyboard input manually when active
+    if (active) {
+        int k = GetCharPressed();
+        while (k > 0) {
+            if (k >= 32 && k <= 125 && len < FLEN - 1) {
+                buf[len++] = (char)k;
+                buf[len]   = '\0';
+            }
+            k = GetCharPressed();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE) && len > 0) buf[len - 1] = '\0';
+        if (IsKeyPressed(KEY_ENTER))                ui.active = 0;
+    }
+}
+
+// Small / Medium / Big toggle buttons — shared by park and update screens
+static void size_buttons(int x, int y, int *sel) {
+    const char *sz[]   = {"Small", "Medium", "Big"};
+    Color       sz_c[] = {C_GRN, C_BLU, C_RED};
+    for (int s = 0; s < 3; s++) {
+        Rectangle rb = {x + s*95, y, 88, 30};
+        if (btn(rb, sz[s], *sel == s ? sz_c[s] : C_INP)) *sel = s;
+        if (*sel == s) DrawRectangleLinesEx(rb, 2.0f, (Color){255,255,255,60});
+    }
 }
 
 // ── raygui dark theme ─────────────────────────────────────────────────
@@ -228,7 +283,13 @@ static void draw_slot_list(int x, int y, int w, int h,
     DrawText(title, x+10, y+10, 13, C_SUB);
     DrawRectangle(x, y+30, w, 1, C_BOR);
     int item_h = 38, visible = (h - 32) / item_h;
-    scroll_clamp(&ui.lscroll, num_slots, visible,
+    int filtered = 0;
+    for (int i = 0; i < num_slots; i++) {
+        if (only_free  &&  lot[i].occupied) continue;
+        if (!only_free && !lot[i].occupied) continue;
+        filtered++;
+    }
+    scroll_clamp(&ui.lscroll, filtered, visible,
                  (Rectangle){x, y+32, w, h-32}, m);
     int count = 0, drawn = 0;
     BeginScissorMode(x, y+32, w, h-32);
@@ -311,7 +372,7 @@ static void draw_nav(Vector2 m) {
     if (btn((Rectangle){5, SCR_H-52, NAV_W-10, 44}, "LOGOUT", C_RED)) {
         ui.role = 0; ui.started = 0;
         ui.scr = S_ROLE_SELECT;
-        ui.active = 0; ui.sel_slot = -1;
+        ui.active = 0; ui.sel_slot = -1; ui.sel_size = -1; ui.upd_size = -1;
         ui.scroll = 0; ui.lscroll = 0;
         msg_set("", WHITE);
     }
@@ -373,15 +434,7 @@ static void draw_park(Vector2 m) {
     if (inf >= 0) ui.sel_size = inf;
 
     DrawText("Vehicle Size", fx, fy, 12, C_SUB);  fy += 18;
-    const char *sz[] = {"Small","Medium","Big"};
-    Color sz_c[] = {C_GRN, C_BLU, C_RED};
-    for (int s = 0; s < 3; s++) {
-        Rectangle rb = {fx+s*95, fy, 88, 30};
-        if (btn(rb, sz[s], ui.sel_size == s ? sz_c[s] : (Color){18,32,72,255}))
-            ui.sel_size = s;
-        if (ui.sel_size == s)
-            DrawRectangleLinesEx(rb, 2.0f, (Color){255,255,255,60});
-    }
+    size_buttons(fx, fy, &ui.sel_size);
     fy += 44;
 
     inp((Rectangle){fx, fy+18, 100, 32}, ui.f_entry, 4, "Entry Hour  (0-23)");  fy += 68;
@@ -473,7 +526,7 @@ static void draw_remove(Vector2 m) {
                 msg_set(err, C_RED); ui.confirm_remove = 0;
             }
         }
-        if (btn((Rectangle){fx+238, fy-4, 90, 36}, "CANCEL", (Color){18,32,72,255})) {
+        if (btn((Rectangle){fx+238, fy-4, 90, 36}, "CANCEL", C_INP)) {
             ui.confirm_remove = 0; msg_set("", WHITE);
         }
     }
@@ -515,14 +568,7 @@ static void draw_update(Vector2 m) {
     if (upd_inf >= 0) ui.upd_size = upd_inf;
 
     DrawText("Size", x, y, 12, C_SUB);  y += 18;
-    const char *sz[] = {"Small","Medium","Big"};
-    Color sz_c[] = {C_GRN, C_BLU, C_RED};
-    for (int s = 0; s < 3; s++) {
-        Rectangle rb = {x+s*95, y, 88, 30};
-        if (btn(rb, sz[s], ui.upd_size == s ? sz_c[s] : (Color){18,32,72,255}))
-            ui.upd_size = s;
-        if (ui.upd_size == s) DrawRectangleLinesEx(rb, 2.0f, (Color){255,255,255,60});
-    }
+    size_buttons(x, y, &ui.upd_size);
     y += 48;
 
     if (btn((Rectangle){x, y, 200, 42}, "SAVE CHANGES", C_GRN)) {
@@ -547,10 +593,10 @@ static void draw_search(Vector2 m) {
     draw_heading(x, y, "Search");  y += 40;
 
     if (btn((Rectangle){x,     y, 150, 34}, "By Plate",
-            ui.search_mode == 0 ? C_BLU : (Color){18,32,72,255}))
+            ui.search_mode == 0 ? C_BLU : C_INP))
         { ui.search_mode = 0; ui.search_idx = -1; }
     if (btn((Rectangle){x+158, y, 150, 34}, "By Slot ID",
-            ui.search_mode == 1 ? C_BLU : (Color){18,32,72,255}))
+            ui.search_mode == 1 ? C_BLU : C_INP))
         { ui.search_mode = 1; ui.search_idx = -1; }
     y += 50;
 
@@ -687,7 +733,7 @@ static void draw_startup(void) {
             else msg_set("Enter a positive number", C_RED);
         }
     }
-    if (btn((Rectangle){bx+20, by+bh-50, 90, 30}, "BACK", (Color){18,32,72,255})) {
+    if (btn((Rectangle){bx+20, by+bh-50, 90, 30}, "BACK", C_INP)) {
         ui.scr = S_ROLE_SELECT; ui.active = 0;
         msg_set("", WHITE);
     }
@@ -704,10 +750,10 @@ static void draw_reports(Vector2 m) {
     draw_heading(x, y, "Reports");  y += 40;
 
     if (btn((Rectangle){x,    y, 120, 34}, "DAILY",
-            ui.report_mode == 0 ? C_BLU : (Color){18,32,72,255}))
+            ui.report_mode == 0 ? C_BLU : C_INP))
         { ui.report_mode = 0; result_count = -1; }
     if (btn((Rectangle){x+128,y, 120, 34}, "MONTHLY",
-            ui.report_mode == 1 ? C_BLU : (Color){18,32,72,255}))
+            ui.report_mode == 1 ? C_BLU : C_INP))
         { ui.report_mode = 1; result_count = -1; }
 
     int dx = x+270;
@@ -729,7 +775,7 @@ static void draw_reports(Vector2 m) {
     }
     dx += 108;
     if (btn((Rectangle){dx, y, 120, 34}, "EXPORT CSV",
-            result_count > 0 ? C_BLU : (Color){18,32,72,255}) && result_count > 0) {
+            result_count > 0 ? C_BLU : C_INP) && result_count > 0) {
         FILE *ef = fopen("reports_export.csv", "w");
         if (ef) {
             fprintf(ef, "Date,Plate,Type,Size,Entry,Exit,Hours,Fee\n");
@@ -815,7 +861,7 @@ static void draw_settings(void) {
     DrawText("Change Credentials", x, y, 13, C_SUB);
     DrawRectangle(x, y+18, 260, 1, C_BOR);  y += 28;
     inp((Rectangle){x, y+18, 260, 32}, ui.f_set_user, 16, "Username");     y += 68;
-    inp((Rectangle){x, y+18, 260, 32}, ui.f_set_pass, 17, "New Password"); y += 68;
+    masked_inp((Rectangle){x, y+18, 260, 32}, ui.f_set_pass, 17, "New Password"); y += 68;
 
     if (btn((Rectangle){x, y, 200, 38}, "SAVE CREDENTIALS", C_GRN)) {
         if (!ui.f_set_user[0]) {
@@ -885,7 +931,7 @@ static void draw_admin_login(void) {
     DrawRectangle(bx+20, by+42, bw-40, 1, C_BOR);
     draw_heading(bx+20, by+54, "Administrator Login");
     inp((Rectangle){bx+20, by+100, 460, 32}, ui.f_username, 11, "Username");
-    inp((Rectangle){bx+20, by+158, 460, 32}, ui.f_password, 12, "Password");
+    masked_inp((Rectangle){bx+20, by+158, 460, 32}, ui.f_password, 12, "Password");
     if (btn((Rectangle){bx+20, by+204, 205, 38}, "LOGIN", C_GRN) || IsKeyPressed(KEY_ENTER)) {
         if (strcmp(ui.f_username, ui.admin_user) == 0 &&
             strcmp(ui.f_password, ui.admin_pass) == 0) {
@@ -895,7 +941,7 @@ static void draw_admin_login(void) {
             msg_set("Invalid username or password.", C_RED);
         }
     }
-    if (btn((Rectangle){bx+275, by+204, 205, 38}, "BACK", (Color){18,32,72,255})) {
+    if (btn((Rectangle){bx+275, by+204, 205, 38}, "BACK", C_INP)) {
         ui.scr = S_ROLE_SELECT; ui.active = 0;
         msg_set("", WHITE);
     }
@@ -920,7 +966,7 @@ static void draw_history(Vector2 m) {
             hist_scroll = 0; msg_set("", WHITE);
         }
     }
-    if (btn((Rectangle){x+336, y, 80, 34}, "CLEAR", (Color){18,32,72,255})) {
+    if (btn((Rectangle){x+336, y, 80, 34}, "CLEAR", C_INP)) {
         ui.f_hist_plate[0] = '\0'; result_count = -1; hist_scroll = 0;
         msg_set("", WHITE);
     }
