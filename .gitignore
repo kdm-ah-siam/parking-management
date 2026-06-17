@@ -1,0 +1,11 @@
+# compiled objects and binaries
+*.o
+*.out
+parking_manager
+
+# macOS
+.DS_Store
+
+# data files (runtime generated)
+parking_data.txt
+reports.txt
