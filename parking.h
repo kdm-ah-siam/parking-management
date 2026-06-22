@@ -1,6 +1,8 @@
 #ifndef PARKING_H
 #define PARKING_H
 
+#include <time.h>
+
 #define MAX_PLATE   20
 #define MAX_TYPE    20
 #define DATA_FILE   "parking_data.txt"
@@ -11,7 +13,8 @@ struct Vehicle {
     char plate[MAX_PLATE];
     char type[MAX_TYPE];
     int  size;           // 0=small  1=medium  2=big
-    int  entry_hour, exit_hour;
+    int  entry_hour, entry_min, entry_sec;
+    int  exit_hour;
     int  entry_day, entry_month, entry_year;
 };
 
@@ -44,12 +47,12 @@ int  find_plate(const char *plate);
 
 // vehicle.c
 int    park_car(int slot_id, const char *plate, const char *type,
-                int size, int entry_hour, char *err);
-int    remove_car(int slot_id, int exit_hour,
-                  double *fee_out, int *hours_out, char *err);
+                int size, char *err);
+int    remove_car(int slot_id, double *fee_out, int *hours_out, char *err);
 int    update_car(int slot_id, const char *plate, const char *type,
                   int size, char *err);
 double calc_fee(int size, int hours);
+time_t vehicle_entry_time(const struct Vehicle *v);
 
 // fileio.c
 int save_file(char *err);

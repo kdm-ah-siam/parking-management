@@ -11,9 +11,10 @@ int save_file(char *err) {
     fprintf(f, "%d %.2f\n", num_slots, income);
     for (int i = 0; i < num_slots; i++) {
         if (lot[i].occupied)
-            fprintf(f, "%d 1 %s %s %d %d %d %d %d %d\n",
+            fprintf(f, "%d 1 %s %s %d %d %d %d %d %d %d %d\n",
                     lot[i].id, lot[i].v.plate, lot[i].v.type, lot[i].v.size,
-                    lot[i].v.entry_hour, lot[i].v.exit_hour,
+                    lot[i].v.entry_hour, lot[i].v.entry_min, lot[i].v.entry_sec,
+                    lot[i].v.exit_hour,
                     lot[i].v.entry_day, lot[i].v.entry_month, lot[i].v.entry_year);
         else
             fprintf(f, "%d 0\n", lot[i].id);
@@ -37,9 +38,10 @@ int load_file(char *err) {
         lot[i].id = id;
         lot[i].occupied = occ;
         if (occ)
-            fscanf(f, " %19s %19s %d %d %d %d %d %d",
+            fscanf(f, " %19s %19s %d %d %d %d %d %d %d %d",
                    lot[i].v.plate, lot[i].v.type, &lot[i].v.size,
-                   &lot[i].v.entry_hour, &lot[i].v.exit_hour,
+                   &lot[i].v.entry_hour, &lot[i].v.entry_min, &lot[i].v.entry_sec,
+                   &lot[i].v.exit_hour,
                    &lot[i].v.entry_day, &lot[i].v.entry_month, &lot[i].v.entry_year);
     }
     fclose(f);
