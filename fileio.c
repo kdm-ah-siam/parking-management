@@ -6,7 +6,8 @@
 #include "parking.h"
 
 int save_file(char *err) {
-    FILE *f = fopen(DATA_FILE, "w");
+    const char *tmp = DATA_FILE ".tmp";
+    FILE *f = fopen(tmp, "w");
     if (!f) { strcpy(err, "Cannot open file for writing"); return 0; }
     fprintf(f, "%d %.2f %.2f %.2f %.2f %.2f %.2f %.2f\n",
             num_slots, income,
@@ -24,6 +25,11 @@ int save_file(char *err) {
             fprintf(f, "%d 0 %d\n", lot[i].id, lot[i].size);
     }
     fclose(f);
+    if (rename(tmp, DATA_FILE) != 0) {
+        strcpy(err, "Failed to save file");
+        remove(tmp);
+        return 0;
+    }
     return 1;
 }
 
@@ -33,7 +39,7 @@ int load_file(char *err) {
     int n = 0; double inc = 0.0;
     // Read header; extra fields (fee_rates, daily_cap) are optional for backward compat
     int hdr = fscanf(f, "%d %lf", &n, &inc);
-    if (hdr != 2 || n <= 0) {
+    if (hdr != 2 || n <= 0 || n > 5000) {
         strcpy(err, "Bad file format"); fclose(f); return 0;
     }
     double fr0, fr1, fr2, dc0, dc1, dc2;
@@ -50,12 +56,16 @@ int load_file(char *err) {
         lot[i].occupied = occ;
         if (occ) {
             int slot_size = 1;
-            fscanf(f, " %19s %19s %d %d %d %d %d %d %d %d %d",
-                   lot[i].v.plate, lot[i].v.type, &lot[i].v.size,
-                   &lot[i].v.entry_hour, &lot[i].v.entry_min, &lot[i].v.entry_sec,
-                   &lot[i].v.exit_hour,
-                   &lot[i].v.entry_day, &lot[i].v.entry_month, &lot[i].v.entry_year,
-                   &slot_size);
+            if (fscanf(f, " %19s %19s %d %d %d %d %d %d %d %d %d",
+                       lot[i].v.plate, lot[i].v.type, &lot[i].v.size,
+                       &lot[i].v.entry_hour, &lot[i].v.entry_min, &lot[i].v.entry_sec,
+                       &lot[i].v.exit_hour,
+                       &lot[i].v.entry_day, &lot[i].v.entry_month, &lot[i].v.entry_year,
+                       &slot_size) != 11) {
+                memset(&lot[i].v, 0, sizeof(lot[i].v));
+                lot[i].v.exit_hour = -1;
+                lot[i].occupied = 0;
+            }
             lot[i].size = slot_size;
         } else {
             int slot_size = 1;

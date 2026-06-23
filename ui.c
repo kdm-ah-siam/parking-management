@@ -239,18 +239,18 @@ static void draw_tbl_row(int x, int y, int w, int i, int highlight) {
     if (i % 2 == 0) { bg.r += 6; bg.g += 6; bg.b += 6; }
     DrawRectangle(x, y, w, 28, bg);
     DrawRectangle(x, y+27, w, 1, (Color){20,40,90,120});
-    char tmp[16]; sprintf(tmp, "%d", lot[i].id);
+    char tmp[16]; snprintf(tmp, sizeof(tmp), "%d", lot[i].id);
     DrawText(tmp, x+8, y+7, 13, C_SUB);
     if (lot[i].occupied) {
         struct Vehicle *v = &lot[i].v;
         DrawText(v->plate,            x+68,  y+7, 13, WHITE);
         DrawText(v->type,             x+195, y+7, 12, C_SUB);
         DrawText(SIZE_NAMES[v->size], x+318, y+7, 12, C_SUB);
-        char es[12]; sprintf(es, "%02d:%02d:%02d", v->entry_hour, v->entry_min, v->entry_sec);
+        char es[12]; snprintf(es, sizeof(es), "%02d:%02d:%02d", v->entry_hour, v->entry_min, v->entry_sec);
         DrawText(es, x+410, y+7, 12, C_SUB);
         char xs[8];
         if (v->exit_hour < 0) strcpy(xs, "---");
-        else sprintf(xs, "%02d:00", v->exit_hour);
+        else snprintf(xs, sizeof(xs), "%02d:00", v->exit_hour);
         DrawText(xs, x+485, y+7, 12, C_SUB);
         DrawRectangle(x+562, y+4, 82, 20, (Color){140,22,22,200});
         DrawText("OCCUPIED", x+565, y+8, 11, WHITE);
@@ -272,7 +272,7 @@ static int draw_list_row(int x, int y, int w, int i, Vector2 m) {
     int sel   = (lot[i].id == ui.sel_slot);
     DrawRectangleRec(r, sel ? C_BLU : hover ? C_NAV_H : C_NAV);
     DrawRectangle(x, y+37, w, 1, C_BOR);
-    char id_s[12]; sprintf(id_s, "Slot  %d", lot[i].id);
+    char id_s[12]; snprintf(id_s, sizeof(id_s), "Slot  %d", lot[i].id);
     DrawText(id_s, x+10, y+5, 14, WHITE);
     if (lot[i].occupied) DrawText(lot[i].v.plate, x+10, y+22, 11, C_SUB);
     else                 DrawText("Free",          x+10, y+22, 11, (Color){60,210,90,255});
@@ -325,10 +325,10 @@ static void draw_stats_bar(void) {
     int bx = NAV_W + 10;
     const char *lbls[] = {"TOTAL","OCCUPIED","AVAILABLE","INCOME"};
     char vs[4][24];
-    sprintf(vs[0], "%d",    num_slots);
-    sprintf(vs[1], "%d",    occ);
-    sprintf(vs[2], "%d",    num_slots - occ);
-    sprintf(vs[3], "$%.2f", income);
+    snprintf(vs[0], 24, "%d",    num_slots);
+    snprintf(vs[1], 24, "%d",    occ);
+    snprintf(vs[2], 24, "%d",    num_slots - occ);
+    snprintf(vs[3], 24, "$%.2f", income);
     for (int i = 0; i < 4; i++) {
         DrawText(lbls[i], bx+i*230,      62, 10, C_DIM);
         DrawText(vs[i],   bx+i*230 + 80, 60, 16, WHITE);
@@ -365,7 +365,7 @@ static void draw_nav(Vector2 m) {
             ui.scr = screens[i];
             ui.active = 0; ui.sel_slot = -1; ui.sel_size = -1;
             ui.scroll = 0; ui.lscroll = 0;
-            ui.confirm_remove = 0;
+            ui.confirm_remove = 0; ui.add_size = 1;
             msg_set("", WHITE);
         }
     }
@@ -409,7 +409,7 @@ static void draw_view_all(Vector2 m) {
     int occ = 0;
     for (int i = 0; i < num_slots; i++) if (lot[i].occupied) occ++;
     char s[64];
-    sprintf(s, "%d slots    %d occupied    %d free", num_slots, occ, num_slots-occ);
+    snprintf(s, sizeof(s), "%d slots    %d occupied    %d free", num_slots, occ, num_slots-occ);
     DrawText(s, x, SCR_H-16, 11, C_DIM);
 }
 
@@ -424,8 +424,10 @@ static void draw_park(Vector2 m) {
     inp((Rectangle){fx, fy+18, 270, 32}, ui.f_type,  3,
         "Vehicle Type  (Car / Truck / Motorcycle)");  fy += 68;
 
-    int inf = infer_size(ui.f_type);
-    if (inf >= 0) ui.sel_size = inf;
+    if (ui.sel_size < 0) {
+        int inf = infer_size(ui.f_type);
+        if (inf >= 0) ui.sel_size = inf;
+    }
 
     DrawText("Vehicle Size", fx, fy, 12, C_SUB);  fy += 18;
     size_buttons(fx, fy, &ui.sel_size);
@@ -443,7 +445,7 @@ static void draw_park(Vector2 m) {
             } else {
                 int slot_id = lot[idx].id;
                 if (park_car(slot_id, ui.f_plate, ui.f_type, ui.sel_size, err)) {
-                    char ok[64]; sprintf(ok, "Parked in Slot #%d!", slot_id);
+                    char ok[64]; snprintf(ok, sizeof(ok), "Parked in Slot #%d!", slot_id);
                     msg_set(ok, (Color){60,220,100,255});
                     ui.f_plate[0] = ui.f_type[0] = '\0';
                     ui.sel_size = -1; ui.active = 0;
@@ -490,12 +492,12 @@ static void draw_remove(Vector2 m) {
 
     char buf[64];
     DrawText("Parked vehicle:", fx, fy, 13, C_SUB);  fy += 22;
-    sprintf(buf, "Plate : %s", v->plate);            DrawText(buf, fx, fy, 14, WHITE); fy += 22;
-    sprintf(buf, "Type  : %s", v->type);             DrawText(buf, fx, fy, 14, WHITE); fy += 22;
-    sprintf(buf, "Size  : %s", SIZE_NAMES[v->size]); DrawText(buf, fx, fy, 14, WHITE); fy += 22;
-    sprintf(buf, "Entry : %02d:%02d:%02d", v->entry_hour, v->entry_min, v->entry_sec);
+    snprintf(buf, sizeof(buf), "Plate : %s", v->plate);            DrawText(buf, fx, fy, 14, WHITE); fy += 22;
+    snprintf(buf, sizeof(buf), "Type  : %s", v->type);             DrawText(buf, fx, fy, 14, WHITE); fy += 22;
+    snprintf(buf, sizeof(buf), "Size  : %s", SIZE_NAMES[v->size]); DrawText(buf, fx, fy, 14, WHITE); fy += 22;
+    snprintf(buf, sizeof(buf), "Entry : %02d:%02d:%02d", v->entry_hour, v->entry_min, v->entry_sec);
     DrawText(buf, fx, fy, 14, WHITE); fy += 30;
-    sprintf(buf, "Now   : %02d:%02d:%02d", now_tm.tm_hour, now_tm.tm_min, now_tm.tm_sec);
+    snprintf(buf, sizeof(buf), "Now   : %02d:%02d:%02d", now_tm.tm_hour, now_tm.tm_min, now_tm.tm_sec);
     DrawText(buf, fx, fy, 14, (Color){80,160,255,255}); fy += 26;
 
     int total_sec = (int)difftime(now_t, cached_entry_t);
@@ -505,13 +507,13 @@ static void draw_remove(Vector2 m) {
     int d_s = total_sec % 60;
     int bill_hours = d_h < 1 ? 1 : d_h;
 
-    sprintf(buf, "Duration: %02d:%02d:%02d", d_h, d_m, d_s);
+    snprintf(buf, sizeof(buf), "Duration: %02d:%02d:%02d", d_h, d_m, d_s);
     DrawText(buf, fx, fy, 14, (Color){255,200,50,255}); fy += 24;
     double fee_preview = calc_fee(v->size, bill_hours);
     if (daily_cap[v->size] > 0.0 && fee_preview >= daily_cap[v->size] - 0.001)
-        sprintf(buf, "Fee: $%.2f (daily cap)", fee_preview);
+        snprintf(buf, sizeof(buf), "Fee: $%.2f (daily cap)", fee_preview);
     else
-        sprintf(buf, "Fee: %d hr  x  $%.2f  =  $%.2f",
+        snprintf(buf, sizeof(buf), "Fee: %d hr  x  $%.2f  =  $%.2f",
                 bill_hours, fee_rates[v->size], fee_preview);
     DrawText(buf, fx, fy, 14, (Color){255,200,50,255}); fy += 32;
 
@@ -526,7 +528,7 @@ static void draw_remove(Vector2 m) {
             char err[128] = ""; double fee; int hours;
             if (remove_car(ui.sel_slot, &fee, &hours, err)) {
                 char ok[80];
-                sprintf(ok, "Removed!  %d hr    Fee: $%.2f    Total: $%.2f",
+                snprintf(ok, sizeof(ok), "Removed!  %d hr    Fee: $%.2f    Total: $%.2f",
                         hours, fee, income);
                 msg_set(ok, (Color){60,220,100,255});
                 ui.sel_slot = -1; ui.active = 0; ui.confirm_remove = 0;
@@ -562,11 +564,15 @@ static void draw_search(Vector2 m) {
     y += 68;
 
     if (btn((Rectangle){x, y, 130, 36}, "SEARCH", C_BLU)) {
-        ui.search_idx = ui.search_mode == 0
-            ? find_plate(ui.f_search)
-            : find_slot(atoi(ui.f_search));
-        if (ui.search_idx < 0) msg_set("Not found.", C_RED);
-        else                   msg_set("", WHITE);
+        if (!ui.f_search[0]) {
+            msg_set("Enter a value to search", C_YEL);
+        } else {
+            ui.search_idx = ui.search_mode == 0
+                ? find_plate(ui.f_search)
+                : find_slot(atoi(ui.f_search));
+            if (ui.search_idx < 0) msg_set("Not found.", C_RED);
+            else                   msg_set("", WHITE);
+        }
     }
     y += 48;
     DrawText(ui.msg, x, y, 13, ui.msg_col);  y += 24;
@@ -581,7 +587,7 @@ static void draw_search(Vector2 m) {
 static void draw_add_slots(void) {
     int x = CON_X+20, y = CON_Y+20;
     draw_heading(x, y, "Add New Parking Slots");  y += 50;
-    char cur[40]; sprintf(cur, "Current slot count:  %d", num_slots);
+    char cur[40]; snprintf(cur, sizeof(cur), "Current slot count:  %d", num_slots);
     DrawText(cur, x, y, 15, C_SUB);  y += 42;
     inp((Rectangle){x, y+18, 170, 36}, ui.f_addslots, 7, "How many slots to add?");  y += 72;
     DrawText("Slot Size", x, y, 12, C_SUB);  y += 18;
@@ -594,7 +600,7 @@ static void draw_add_slots(void) {
         } else {
             add_slots_n(n, ui.add_size);
             char ok[64];
-            sprintf(ok, "Added %d %s.  Total: %d slots.", n, SIZE_NAMES[ui.add_size], num_slots);
+            snprintf(ok, sizeof(ok), "Added %d %s.  Total: %d slots.", n, SIZE_NAMES[ui.add_size], num_slots);
             msg_set(ok, (Color){60,220,100,255});
             ui.f_addslots[0] = '\0';
         }
@@ -672,10 +678,10 @@ static void draw_reports(Vector2 m) {
 
     if (btn((Rectangle){x,    y, 120, 34}, "DAILY",
             ui.report_mode == 0 ? C_BLU : C_INP))
-        { ui.report_mode = 0; result_count = -1; }
+        { ui.report_mode = 0; result_count = -1; rep_scroll = 0; }
     if (btn((Rectangle){x+128,y, 120, 34}, "MONTHLY",
             ui.report_mode == 1 ? C_BLU : C_INP))
-        { ui.report_mode = 1; result_count = -1; }
+        { ui.report_mode = 1; result_count = -1; rep_scroll = 0; }
 
     int dx = x+270;
     if (ui.report_mode == 0) {
@@ -725,9 +731,9 @@ static void draw_reports(Vector2 m) {
     double avg_fee = result_count > 0 ? total_fee / result_count : 0.0;
 
     char sv[32];
-    sprintf(sv, "%d", result_count);  draw_card(x,     y, 185, 68, "CUSTOMERS", sv, C_CARD);
-    sprintf(sv, "$%.2f", total_fee);  draw_card(x+195, y, 185, 68, "TOTAL FEE", sv, (Color){130,85,15,255});
-    sprintf(sv, "$%.2f", avg_fee);    draw_card(x+390, y, 185, 68, "AVG FEE",   sv, C_CARD);
+    snprintf(sv, sizeof(sv), "%d", result_count);  draw_card(x,     y, 185, 68, "CUSTOMERS", sv, C_CARD);
+    snprintf(sv, sizeof(sv), "$%.2f", total_fee);  draw_card(x+195, y, 185, 68, "TOTAL FEE", sv, (Color){130,85,15,255});
+    snprintf(sv, sizeof(sv), "$%.2f", avg_fee);    draw_card(x+390, y, 185, 68, "AVG FEE",   sv, C_CARD);
     y += 84;
 
     if (result_count == 0) {
@@ -752,16 +758,16 @@ static void draw_reports(Vector2 m) {
         DrawRectangle(x, ry, tw, row_h, bg);
         DrawRectangle(x, ry+row_h-1, tw, 1, (Color){20,40,90,100});
         char tmp[32];
-        sprintf(tmp,"%04d-%02d-%02d",results[i].year,results[i].month,results[i].day);
+        snprintf(tmp,sizeof(tmp),"%04d-%02d-%02d",results[i].year,results[i].month,results[i].day);
         DrawText(tmp,                         x+8,  ry+6,12,C_SUB);
         DrawText(results[i].plate,            x+115,ry+6,12,WHITE);
         DrawText(results[i].type,             x+235,ry+6,12,C_SUB);
         DrawText(SIZE_NAMES[results[i].size], x+355,ry+6,12,C_SUB);
-        sprintf(tmp,"%d hr",results[i].hours); DrawText(tmp,x+435,ry+6,12,C_SUB);
-        sprintf(tmp,"$%.2f",results[i].fee);   DrawText(tmp,x+515,ry+6,12,(Color){60,220,100,255});
+        snprintf(tmp,sizeof(tmp),"%d hr",results[i].hours); DrawText(tmp,x+435,ry+6,12,C_SUB);
+        snprintf(tmp,sizeof(tmp),"$%.2f",results[i].fee);   DrawText(tmp,x+515,ry+6,12,(Color){60,220,100,255});
     }
     EndScissorMode();
-    char footer[48]; sprintf(footer,"%d records",result_count);
+    char footer[48]; snprintf(footer,sizeof(footer),"%d records",result_count);
     DrawText(footer, x, SCR_H-16, 11, C_DIM);
 }
 

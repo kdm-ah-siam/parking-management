@@ -92,8 +92,9 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     income    += fee;
 
     char rerr[128] = "";
-    append_report(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday,
-                  v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr);
+    if (!append_report(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday,
+                       v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr))
+        fprintf(stderr, "report write failed: %s\n", rerr);
 
     memset(v, 0, sizeof(struct Vehicle));
     v->exit_hour    = -1;
