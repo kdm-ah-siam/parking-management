@@ -6,7 +6,9 @@
 #include "parking.h"
 
 double calc_fee(int size, int hours) {
-    return hours * fee_rates[size];
+    double fee = hours * fee_rates[size];
+    if (daily_cap[size] > 0.0 && fee > daily_cap[size]) fee = daily_cap[size];
+    return fee;
 }
 
 time_t vehicle_entry_time(const struct Vehicle *v) {
@@ -48,6 +50,7 @@ int park_car(int slot_id, const char *plate, const char *type,
     int i = find_slot(slot_id);
     if (i < 0)               { strcpy(err, "Slot not found");       return 0; }
     if (lot[i].occupied)     { strcpy(err, "Slot already occupied"); return 0; }
+    if (lot[i].size != size) { strcpy(err, "Slot size mismatch");    return 0; }
     if (find_plate(up) >= 0) { strcpy(err, "Plate already parked");  return 0; }
 
     strncpy(lot[i].v.plate, up, MAX_PLATE - 1);
@@ -98,21 +101,3 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     return 1;
 }
 
-int update_car(int slot_id, const char *plate, const char *type, int size, char *err) {
-    int i = find_slot(slot_id);
-    if (i < 0)            { strcpy(err, "Slot not found"); return 0; }
-    if (!lot[i].occupied) { strcpy(err, "Slot is empty");  return 0; }
-
-    if (plate && plate[0] && strcmp(plate, lot[i].v.plate) != 0) {
-        char up[MAX_PLATE] = {0};
-        if (!normalize_plate(plate, up)) {
-            strcpy(err, "Plate: letters, numbers, hyphens only");
-            return 0;
-        }
-        if (find_plate(up) >= 0) { strcpy(err, "Plate already in use"); return 0; }
-        strncpy(lot[i].v.plate, up, MAX_PLATE - 1);
-    }
-    if (type && type[0]) strncpy(lot[i].v.type, type, MAX_TYPE - 1);
-    if (size >= 0 && size <= 2) lot[i].v.size = size;
-    return 1;
-}

@@ -57,11 +57,14 @@ static struct {
     int    active, started, has_file;
 
     // text field buffers (plain char arrays — raygui reads these directly)
-    char f_start[FLEN], f_plate[FLEN], f_type[FLEN];
+    char f_plate[FLEN], f_type[FLEN];
     char f_search[FLEN], f_addslots[FLEN];
     char f_username[FLEN], f_password[FLEN];
     char f_rep_day[FLEN], f_rep_month[FLEN], f_rep_year[FLEN];
     char f_set_user[FLEN], f_set_pass[FLEN], f_set_r0[FLEN], f_set_r1[FLEN], f_set_r2[FLEN];
+    char f_set_dc0[FLEN], f_set_dc1[FLEN], f_set_dc2[FLEN];
+    char f_small_n[FLEN], f_medium_n[FLEN], f_big_n[FLEN];
+    int  add_size;
 
     int sel_slot, sel_size, search_mode, search_idx;
     char  msg[128];
@@ -224,9 +227,9 @@ static void draw_card(int x, int y, int w, int h,
 
 static void draw_tbl_header(int x, int y, int w) {
     DrawRectangle(x, y, w, 28, C_HEADER);
-    const char *cols[] = {"Slot","Plate","Type","Size","Entry","Exit","Status"};
-    int         offx[] = {8, 68, 195, 318, 410, 485, 562};
-    for (int i = 0; i < 7; i++)
+    const char *cols[] = {"Slot","Plate","Type","V.Size","Entry","Exit","Status","Slot Sz"};
+    int         offx[] = {8, 68, 195, 318, 410, 485, 562, 660};
+    for (int i = 0; i < 8; i++)
         DrawText(cols[i], x + offx[i], y + 7, 12, C_SUB);
 }
 
@@ -260,6 +263,7 @@ static void draw_tbl_row(int x, int y, int w, int i, int highlight) {
         DrawRectangle(x+562, y+4, 50, 20, (Color){18,110,45,200});
         DrawText("FREE", x+572, y+8, 11, WHITE);
     }
+    DrawText(SIZE_NAMES[lot[i].size], x+660, y+7, 12, C_SUB);
 }
 
 static int draw_list_row(int x, int y, int w, int i, Vector2 m) {
@@ -412,17 +416,9 @@ static void draw_view_all(Vector2 m) {
 // ── SCREEN: PARK VEHICLE ─────────────────────────────────────────────
 
 static void draw_park(Vector2 m) {
-    int lw = 210, fx = CON_X+lw+18, fy = CON_Y+15;
-    draw_slot_list(CON_X+4, CON_Y+4, lw, CON_H-8, "Free Slots", 1, m);
-    DrawRectangle(fx-9, CON_Y, 1, CON_H, C_BOR);
+    (void)m;
+    int fx = CON_X+20, fy = CON_Y+15;
     draw_heading(fx, fy, "Park a Vehicle");  fy += 36;
-
-    DrawText("Selected Slot :", fx, fy, 13, C_SUB);
-    char sel_s[24];
-    if (ui.sel_slot > 0) sprintf(sel_s, "Slot  %d", ui.sel_slot);
-    else                 strcpy(sel_s, "(click list)");
-    DrawText(sel_s, fx+130, fy, 13, ui.sel_slot > 0 ? WHITE : C_DIM);
-    fy += 32;
 
     inp((Rectangle){fx, fy+18, 270, 32}, ui.f_plate, 2, "Plate Number");  fy += 68;
     inp((Rectangle){fx, fy+18, 270, 32}, ui.f_type,  3,
@@ -437,16 +433,24 @@ static void draw_park(Vector2 m) {
 
     if (btn((Rectangle){fx, fy, 210, 42}, "PARK VEHICLE", C_GRN)) {
         char err[128] = "";
-        if (ui.sel_slot <= 0) {
-            msg_set("Select a free slot from the list", C_YEL);
-        } else if (park_car(ui.sel_slot, ui.f_plate, ui.f_type,
-                            ui.sel_size, err)) {
-            char ok[64]; sprintf(ok, "Parked in Slot %d!", ui.sel_slot);
-            msg_set(ok, (Color){60,220,100,255});
-            ui.f_plate[0] = ui.f_type[0] = '\0';
-            ui.sel_slot = -1; ui.sel_size = -1; ui.active = 0;
+        if (ui.sel_size < 0 || ui.sel_size > 2) {
+            msg_set("Select a vehicle size", C_YEL);
         } else {
-            msg_set(err, C_RED);
+            int idx = find_best_slot(ui.sel_size);
+            if (idx < 0) {
+                snprintf(err, sizeof(err), "No %s slots available", SIZE_NAMES[ui.sel_size]);
+                msg_set(err, C_YEL);
+            } else {
+                int slot_id = lot[idx].id;
+                if (park_car(slot_id, ui.f_plate, ui.f_type, ui.sel_size, err)) {
+                    char ok[64]; sprintf(ok, "Parked in Slot #%d!", slot_id);
+                    msg_set(ok, (Color){60,220,100,255});
+                    ui.f_plate[0] = ui.f_type[0] = '\0';
+                    ui.sel_size = -1; ui.active = 0;
+                } else {
+                    msg_set(err, C_RED);
+                }
+            }
         }
     }
     fy += 52;
@@ -503,8 +507,12 @@ static void draw_remove(Vector2 m) {
 
     sprintf(buf, "Duration: %02d:%02d:%02d", d_h, d_m, d_s);
     DrawText(buf, fx, fy, 14, (Color){255,200,50,255}); fy += 24;
-    sprintf(buf, "Fee: %d hr  x  $%.2f  =  $%.2f",
-            bill_hours, fee_rates[v->size], calc_fee(v->size, bill_hours));
+    double fee_preview = calc_fee(v->size, bill_hours);
+    if (daily_cap[v->size] > 0.0 && fee_preview >= daily_cap[v->size] - 0.001)
+        sprintf(buf, "Fee: $%.2f (daily cap)", fee_preview);
+    else
+        sprintf(buf, "Fee: %d hr  x  $%.2f  =  $%.2f",
+                bill_hours, fee_rates[v->size], fee_preview);
     DrawText(buf, fx, fy, 14, (Color){255,200,50,255}); fy += 32;
 
     if (!ui.confirm_remove || ui.confirm_slot_id != ui.sel_slot) {
@@ -576,13 +584,17 @@ static void draw_add_slots(void) {
     char cur[40]; sprintf(cur, "Current slot count:  %d", num_slots);
     DrawText(cur, x, y, 15, C_SUB);  y += 42;
     inp((Rectangle){x, y+18, 170, 36}, ui.f_addslots, 7, "How many slots to add?");  y += 72;
+    DrawText("Slot Size", x, y, 12, C_SUB);  y += 18;
+    size_buttons(x, y, &ui.add_size);
+    y += 48;
     if (btn((Rectangle){x, y, 170, 42}, "ADD SLOTS", C_GRN)) {
         int n = atoi(ui.f_addslots);
         if (n <= 0) {
             msg_set("Enter a positive number", C_YEL);
         } else {
-            add_slots_n(n);
-            char ok[48]; sprintf(ok, "Added %d.  Total: %d slots.", n, num_slots);
+            add_slots_n(n, ui.add_size);
+            char ok[64];
+            sprintf(ok, "Added %d %s.  Total: %d slots.", n, SIZE_NAMES[ui.add_size], num_slots);
             msg_set(ok, (Color){60,220,100,255});
             ui.f_addslots[0] = '\0';
         }
@@ -593,9 +605,20 @@ static void draw_add_slots(void) {
 
 // ── STARTUP OVERLAY ───────────────────────────────────────────────────
 
+static void create_lot_from_fields(void) {
+    int s = atoi(ui.f_small_n), m = atoi(ui.f_medium_n), b = atoi(ui.f_big_n);
+    int total = s + m + b;
+    if (total <= 0) { msg_set("Enter at least one slot", C_RED); return; }
+    init_lot(total);
+    for (int i = 0; i < s; i++)         lot[i].size = 0;
+    for (int i = s; i < s+m; i++)       lot[i].size = 1;
+    for (int i = s+m; i < total; i++)   lot[i].size = 2;
+    ui.started = 1; ui.scr = S_VIEW;
+}
+
 static void draw_startup(void) {
     DrawRectangle(0, 0, SCR_W, SCR_H, (Color){0,0,0,190});
-    int bh = ui.has_file ? 300 : 230;
+    int bh = ui.has_file ? 310 : 240;
     int bw = 500, bx = (SCR_W-bw)/2, by = (SCR_H-bh)/2;
     DrawRectangle(bx, by, bw, bh, C_PANEL);
     DrawRectangleLinesEx((Rectangle){bx,by,bw,bh}, 2.0f, C_BLU);
@@ -605,24 +628,31 @@ static void draw_startup(void) {
         DrawText("Save file found:  parking_data.txt", bx+20, by+54, 13, C_SUB);
         if (btn((Rectangle){bx+20, by+84, 220, 44}, "LOAD SAVED DATA", C_GRN)) {
             char err[128] = "";
-            if (load_file(err)) { ui.started = 1; ui.scr = S_VIEW; }
-            else                  msg_set(err, C_RED);
+            if (load_file(err)) {
+                ui.started = 1; ui.scr = S_VIEW;
+                snprintf(ui.f_set_r0,  FLEN, "%.2f", fee_rates[0]);
+                snprintf(ui.f_set_r1,  FLEN, "%.2f", fee_rates[1]);
+                snprintf(ui.f_set_r2,  FLEN, "%.2f", fee_rates[2]);
+                snprintf(ui.f_set_dc0, FLEN, "%.2f", daily_cap[0]);
+                snprintf(ui.f_set_dc1, FLEN, "%.2f", daily_cap[1]);
+                snprintf(ui.f_set_dc2, FLEN, "%.2f", daily_cap[2]);
+            } else {
+                msg_set(err, C_RED);
+            }
         }
-        DrawText("- or start a new lot -", bx+150, by+140, 12, C_DIM);
-        inp((Rectangle){bx+20, by+164, 165, 34}, ui.f_start, 1, NULL);
-        if (btn((Rectangle){bx+194, by+164, 100, 34}, "CREATE", C_BLU) || IsKeyPressed(KEY_ENTER)) {
-            int n = atoi(ui.f_start);
-            if (n > 0) { init_lot(n); ui.started = 1; ui.scr = S_VIEW; }
-            else msg_set("Enter a valid size", C_RED);
-        }
+        DrawText("- or start a new lot (Small / Medium / Big) -", bx+20, by+142, 12, C_DIM);
+        inp((Rectangle){bx+20,  by+174, 85, 34}, ui.f_small_n,  22, "Small");
+        inp((Rectangle){bx+115, by+174, 85, 34}, ui.f_medium_n, 23, "Medium");
+        inp((Rectangle){bx+210, by+174, 85, 34}, ui.f_big_n,    24, "Big");
+        if (btn((Rectangle){bx+310, by+174, 100, 34}, "CREATE", C_BLU))
+            create_lot_from_fields();
     } else {
-        DrawText("Enter the parking lot size to begin:", bx+20, by+54, 13, C_SUB);
-        inp((Rectangle){bx+20, by+86, 200, 36}, ui.f_start, 1, NULL);
-        if (btn((Rectangle){bx+228, by+86, 120, 36}, "CREATE", C_BLU) || IsKeyPressed(KEY_ENTER)) {
-            int n = atoi(ui.f_start);
-            if (n > 0) { init_lot(n); ui.started = 1; ui.scr = S_VIEW; }
-            else msg_set("Enter a positive number", C_RED);
-        }
+        DrawText("Enter slot counts (Small / Medium / Big):", bx+20, by+54, 13, C_SUB);
+        inp((Rectangle){bx+20,  by+90, 85, 36}, ui.f_small_n,  22, "Small");
+        inp((Rectangle){bx+115, by+90, 85, 36}, ui.f_medium_n, 23, "Medium");
+        inp((Rectangle){bx+210, by+90, 85, 36}, ui.f_big_n,    24, "Big");
+        if (btn((Rectangle){bx+310, by+90, 110, 36}, "CREATE", C_BLU) || IsKeyPressed(KEY_ENTER))
+            create_lot_from_fields();
     }
     if (btn((Rectangle){bx+20, by+bh-50, 90, 30}, "BACK", C_INP)) {
         ui.scr = S_ROLE_SELECT; ui.active = 0;
@@ -740,8 +770,7 @@ static void draw_reports(Vector2 m) {
 static void save_admin_cfg(void) {
     FILE *cf = fopen("admin.cfg","w");
     if (!cf) return;
-    fprintf(cf, "%s\n%s\n%.2f %.2f %.2f\n",
-            ui.admin_user, ui.admin_pass, fee_rates[0], fee_rates[1], fee_rates[2]);
+    fprintf(cf, "%s\n%s\n", ui.admin_user, ui.admin_pass);
     fclose(cf);
 }
 
@@ -783,8 +812,28 @@ static void draw_settings(void) {
             snprintf(ui.f_set_r0, FLEN, "%.2f", r0);
             snprintf(ui.f_set_r1, FLEN, "%.2f", r1);
             snprintf(ui.f_set_r2, FLEN, "%.2f", r2);
-            save_admin_cfg();
             msg_set("Rates saved.", (Color){60,220,100,255});
+        }
+    }
+    y += 52;
+
+    DrawText("Daily Cap  ($ max per day,  0 = no cap)", x, y, 13, C_SUB);
+    DrawRectangle(x, y+18, 260, 1, C_BOR);  y += 28;
+    inp((Rectangle){x,     y+18, 75, 32}, ui.f_set_dc0, 21, "Small");
+    inp((Rectangle){x+85,  y+18, 75, 32}, ui.f_set_dc1, 22, "Medium");
+    inp((Rectangle){x+170, y+18, 75, 32}, ui.f_set_dc2, 23, "Big");
+    y += 68;
+
+    if (btn((Rectangle){x, y, 160, 38}, "SAVE CAPS", C_GRN)) {
+        double dc0 = atof(ui.f_set_dc0), dc1 = atof(ui.f_set_dc1), dc2 = atof(ui.f_set_dc2);
+        if (dc0 < 0 || dc1 < 0 || dc2 < 0) {
+            msg_set("Caps must be 0 or greater", C_RED);
+        } else {
+            daily_cap[0] = dc0; daily_cap[1] = dc1; daily_cap[2] = dc2;
+            snprintf(ui.f_set_dc0, FLEN, "%.2f", dc0);
+            snprintf(ui.f_set_dc1, FLEN, "%.2f", dc1);
+            snprintf(ui.f_set_dc2, FLEN, "%.2f", dc2);
+            msg_set("Daily caps saved.", (Color){60,220,100,255});
         }
     }
     y += 52;
@@ -810,8 +859,15 @@ static void draw_role_select(void) {
         ui.role = 1;
         if (ui.has_file) {
             char err[128] = "";
-            if (load_file(err)) { ui.started = 1; ui.scr = S_VIEW; }
-            else { ui.scr = S_STARTUP; ui.active = 1; }
+            if (load_file(err)) {
+                ui.started = 1; ui.scr = S_VIEW;
+                snprintf(ui.f_set_r0,  FLEN, "%.2f", fee_rates[0]);
+                snprintf(ui.f_set_r1,  FLEN, "%.2f", fee_rates[1]);
+                snprintf(ui.f_set_r2,  FLEN, "%.2f", fee_rates[2]);
+                snprintf(ui.f_set_dc0, FLEN, "%.2f", daily_cap[0]);
+                snprintf(ui.f_set_dc1, FLEN, "%.2f", daily_cap[1]);
+                snprintf(ui.f_set_dc2, FLEN, "%.2f", daily_cap[2]);
+            } else { ui.scr = S_STARTUP; ui.active = 1; }
         } else {
             ui.scr = S_STARTUP; ui.active = 1;
         }
@@ -865,22 +921,22 @@ void ui_init(void) {
     FILE *cf = fopen("admin.cfg", "r");
     if (cf) {
         fscanf(cf, "%63s %63s", ui.admin_user, ui.admin_pass);
-        double r0, r1, r2;
-        if (fscanf(cf, "%lf %lf %lf", &r0, &r1, &r2) == 3) {
-            fee_rates[0] = r0; fee_rates[1] = r1; fee_rates[2] = r2;
-        }
         fclose(cf);
     } else {
         strncpy(ui.admin_user, "admin", 63);
         strncpy(ui.admin_pass, "1234",  63);
         cf = fopen("admin.cfg", "w");
-        if (cf) { fprintf(cf, "admin\n1234\n1.00 2.00 3.00\n"); fclose(cf); }
+        if (cf) { fprintf(cf, "admin\n1234\n"); fclose(cf); }
     }
 
     snprintf(ui.f_set_user, FLEN, "%s",   ui.admin_user);
     snprintf(ui.f_set_r0,   FLEN, "%.2f", fee_rates[0]);
     snprintf(ui.f_set_r1,   FLEN, "%.2f", fee_rates[1]);
     snprintf(ui.f_set_r2,   FLEN, "%.2f", fee_rates[2]);
+    snprintf(ui.f_set_dc0,  FLEN, "%.2f", daily_cap[0]);
+    snprintf(ui.f_set_dc1,  FLEN, "%.2f", daily_cap[1]);
+    snprintf(ui.f_set_dc2,  FLEN, "%.2f", daily_cap[2]);
+    ui.add_size = 1;
 
     FILE *f = fopen(DATA_FILE, "r");
     if (f) { fclose(f); ui.has_file = 1; }
