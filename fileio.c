@@ -1,4 +1,4 @@
-// fileio.c — save/load parking_data.txt and read/write reports.txt
+// fileio.c
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,23 +6,27 @@
 #include "parking.h"
 
 int save_file(char *err) {
-    const char *tmp = DATA_FILE ".tmp";
+    char tmp[64] = "parking_data.txt.tmp";
     FILE *f = fopen(tmp, "w");
-    if (!f) { strcpy(err, "Cannot open file for writing"); return 0; }
+    if (!f) {
+        strcpy(err, "Cannot open file for writing");
+        return 0;
+    }
     fprintf(f, "%d %.2f %.2f %.2f %.2f %.2f %.2f %.2f\n",
             num_slots, income,
             fee_rates[0], fee_rates[1], fee_rates[2],
             daily_cap[0], daily_cap[1], daily_cap[2]);
     for (int i = 0; i < num_slots; i++) {
-        if (lot[i].occupied)
+        if (lot[i].occupied) {
             fprintf(f, "%d 1 %s %s %d %d %d %d %d %d %d %d %d\n",
                     lot[i].id, lot[i].v.plate, lot[i].v.type, lot[i].v.size,
                     lot[i].v.entry_hour, lot[i].v.entry_min, lot[i].v.entry_sec,
                     lot[i].v.exit_hour,
                     lot[i].v.entry_day, lot[i].v.entry_month, lot[i].v.entry_year,
                     lot[i].size);
-        else
+        } else {
             fprintf(f, "%d 0 %d\n", lot[i].id, lot[i].size);
+        }
     }
     fclose(f);
     if (rename(tmp, DATA_FILE) != 0) {
@@ -35,22 +39,36 @@ int save_file(char *err) {
 
 int load_file(char *err) {
     FILE *f = fopen(DATA_FILE, "r");
-    if (!f) { strcpy(err, "File not found"); return 0; }
-    int n = 0; double inc = 0.0;
-    // Read header; extra fields (fee_rates, daily_cap) are optional for backward compat
+    if (!f) {
+        strcpy(err, "File not found");
+        return 0;
+    }
+
+    int n = 0;
+    double inc = 0.0;
     int hdr = fscanf(f, "%d %lf", &n, &inc);
     if (hdr != 2 || n <= 0 || n > 5000) {
-        strcpy(err, "Bad file format"); fclose(f); return 0;
+        strcpy(err, "Bad file format");
+        fclose(f);
+        return 0;
     }
+
     double fr0, fr1, fr2, dc0, dc1, dc2;
     if (fscanf(f, " %lf %lf %lf %lf %lf %lf", &fr0, &fr1, &fr2, &dc0, &dc1, &dc2) == 6) {
-        fee_rates[0] = fr0; fee_rates[1] = fr1; fee_rates[2] = fr2;
-        daily_cap[0] = dc0; daily_cap[1] = dc1; daily_cap[2] = dc2;
+        fee_rates[0] = fr0;
+        fee_rates[1] = fr1;
+        fee_rates[2] = fr2;
+        daily_cap[0] = dc0;
+        daily_cap[1] = dc1;
+        daily_cap[2] = dc2;
     }
+
     init_lot(n);
     income = inc;
+
     for (int i = 0; i < n; i++) {
-        int id = 0, occ = 0;
+        int id = 0;
+        int occ = 0;
         if (fscanf(f, "%d %d", &id, &occ) != 2) break;
         lot[i].id = id;
         lot[i].occupied = occ;
@@ -81,19 +99,23 @@ int append_report(int year, int month, int day,
                   int entry_h, int exit_h, const char *plate, const char *type,
                   int size, int hours, double fee, char *err) {
     FILE *f = fopen(REPORT_FILE, "a");
-    if (!f) { strcpy(err, "Cannot open reports file"); return 0; }
+    if (!f) {
+        strcpy(err, "Cannot open reports file");
+        return 0;
+    }
     fprintf(f, "%04d-%02d-%02d %d %d %s %s %d %d %.2f\n",
             year, month, day, entry_h, exit_h, plate, type, size, hours, fee);
     fclose(f);
     return 1;
 }
 
-// parse one line from reports.txt into a Transaction; returns 1 on success
 static int parse_line(const char *line, struct Transaction *t) {
     char date[16];
     if (sscanf(line, "%15s %d %d %19s %19s %d %d %lf",
                date, &t->entry_h, &t->exit_h, t->plate, t->type,
-               &t->size, &t->hours, &t->fee) != 8) return 0;
+               &t->size, &t->hours, &t->fee) != 8) {
+        return 0;
+    }
     return sscanf(date, "%d-%d-%d", &t->year, &t->month, &t->day) == 3;
 }
 
@@ -112,4 +134,3 @@ int read_reports(int year, int month, int day, struct Transaction *out, int max)
     fclose(f);
     return count;
 }
-

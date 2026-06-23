@@ -82,7 +82,7 @@ static int infer_size(const char *type) {
     if (!type || !type[0]) return -1;
     char low[MAX_TYPE] = {0};
     for (int i = 0; type[i] && i < MAX_TYPE - 1; i++)
-        low[i] = tolower((unsigned char)type[i]);
+        low[i] = tolower(type[i]);
     if (strstr(low,"motorcycle") || strstr(low,"bike") ||
         strstr(low,"moto")       || strstr(low,"scooter")) return 0;
     if (strstr(low,"truck") || strstr(low,"bus") || strstr(low,"lorry")) return 2;
@@ -97,9 +97,9 @@ static void msg_set(const char *s, Color c) {
 }
 
 static Color brighter(Color c) {
-    c.r = c.r + 22 > 255 ? 255 : c.r + 22;
-    c.g = c.g + 22 > 255 ? 255 : c.g + 22;
-    c.b = c.b + 22 > 255 ? 255 : c.b + 22;
+    if (c.r + 22 > 255) c.r = 255; else c.r += 22;
+    if (c.g + 22 > 255) c.g = 255; else c.g += 22;
+    if (c.b + 22 > 255) c.b = 255; else c.b += 22;
     return c;
 }
 
@@ -128,8 +128,10 @@ static int btn(Rectangle r, const char *label, Color col) {
 // labeled text input — label sits above the box; toggles active on click/enter
 static void inp(Rectangle r, char *buf, int id, const char *label) {
     if (label) DrawText(label, (int)r.x, (int)r.y - 16, 12, C_SUB);
-    if (GuiTextBox(r, buf, FLEN, ui.active == id))
-        ui.active = ui.active == id ? 0 : id;
+    if (GuiTextBox(r, buf, FLEN, ui.active == id)) {
+        if (ui.active == id) ui.active = 0;
+        else ui.active = id;
+    }
 }
 
 // same as inp() but displays **** instead of real characters

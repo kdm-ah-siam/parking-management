@@ -1,13 +1,16 @@
-// vehicle.c — park, remove, update vehicles and fee calculation
+// vehicle.c
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <time.h>
 #include "parking.h"
 
 double calc_fee(int size, int hours) {
     double fee = hours * fee_rates[size];
-    if (daily_cap[size] > 0.0 && fee > daily_cap[size]) fee = daily_cap[size];
+    if (daily_cap[size] > 0.0 && fee > daily_cap[size]) {
+        fee = daily_cap[size];
+    }
     return fee;
 }
 
@@ -23,23 +26,28 @@ time_t vehicle_entry_time(const struct Vehicle *v) {
     return mktime(&t);
 }
 
-// uppercase + validate: only letters, digits, hyphens allowed
+// converts plate to uppercase and checks for valid characters
 static int normalize_plate(const char *in, char *out) {
-    int j;
-    for (j = 0; in[j] && j < MAX_PLATE - 1; j++) {
-        char c = in[j];
-        if (c >= 'a' && c <= 'z') c -= 32;
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-')) return 0;
+    int j = 0;
+    while (in[j] && j < MAX_PLATE - 1) {
+        char c = toupper(in[j]);
+        if (!isalpha(c) && !isdigit(c) && c != '-') return 0;
         out[j] = c;
+        j++;
     }
     out[j] = '\0';
     return 1;
 }
 
-int park_car(int slot_id, const char *plate, const char *type,
-             int size, char *err) {
-    if (!plate || !plate[0])  { strcpy(err, "Plate is empty"); return 0; }
-    if (size < 0 || size > 2) { strcpy(err, "Pick a size");    return 0; }
+int park_car(int slot_id, const char *plate, const char *type, int size, char *err) {
+    if (!plate || !plate[0]) {
+        strcpy(err, "Plate is empty");
+        return 0;
+    }
+    if (size < 0 || size > 2) {
+        strcpy(err, "Pick a size");
+        return 0;
+    }
 
     char up[MAX_PLATE] = {0};
     if (!normalize_plate(plate, up)) {
@@ -48,15 +56,33 @@ int park_car(int slot_id, const char *plate, const char *type,
     }
 
     int i = find_slot(slot_id);
-    if (i < 0)               { strcpy(err, "Slot not found");       return 0; }
-    if (lot[i].occupied)     { strcpy(err, "Slot already occupied"); return 0; }
-    if (lot[i].size != size) { strcpy(err, "Slot size mismatch");    return 0; }
-    if (find_plate(up) >= 0) { strcpy(err, "Plate already parked");  return 0; }
+    if (i < 0) {
+        strcpy(err, "Slot not found");
+        return 0;
+    }
+    if (lot[i].occupied) {
+        strcpy(err, "Slot already occupied");
+        return 0;
+    }
+    if (lot[i].size != size) {
+        strcpy(err, "Slot size mismatch");
+        return 0;
+    }
+    if (find_plate(up) >= 0) {
+        strcpy(err, "Plate already parked");
+        return 0;
+    }
 
     strncpy(lot[i].v.plate, up, MAX_PLATE - 1);
-    strncpy(lot[i].v.type, (type && type[0]) ? type : "Unknown", MAX_TYPE - 1);
-    lot[i].v.size       = size;
-    lot[i].v.exit_hour  = -1;
+
+    if (type && type[0]) {
+        strncpy(lot[i].v.type, type, MAX_TYPE - 1);
+    } else {
+        strncpy(lot[i].v.type, "Unknown", MAX_TYPE - 1);
+    }
+
+    lot[i].v.size      = size;
+    lot[i].v.exit_hour = -1;
 
     time_t now = time(NULL);
     struct tm *td = localtime(&now);
@@ -72,14 +98,18 @@ int park_car(int slot_id, const char *plate, const char *type,
 
 int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     int i = find_slot(slot_id);
-    if (i < 0)            { strcpy(err, "Slot not found"); return 0; }
-    if (!lot[i].occupied) { strcpy(err, "Slot is empty");  return 0; }
+    if (i < 0) {
+        strcpy(err, "Slot not found");
+        return 0;
+    }
+    if (!lot[i].occupied) {
+        strcpy(err, "Slot is empty");
+        return 0;
+    }
 
     struct Vehicle *v = &lot[i].v;
 
     time_t entry_t = vehicle_entry_time(v);
-
-    // exit = current time
     time_t now_t = time(NULL);
     struct tm today = *localtime(&now_t);
 
@@ -89,16 +119,16 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     double fee = calc_fee(v->size, hours);
     *fee_out   = fee;
     *hours_out = hours;
-    income    += fee;
+    income += fee;
 
     char rerr[128] = "";
     if (!append_report(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday,
-                       v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr))
+                       v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr)) {
         fprintf(stderr, "report write failed: %s\n", rerr);
+    }
 
     memset(v, 0, sizeof(struct Vehicle));
-    v->exit_hour    = -1;
+    v->exit_hour = -1;
     lot[i].occupied = 0;
     return 1;
 }
-
