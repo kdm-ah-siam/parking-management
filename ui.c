@@ -45,7 +45,7 @@
 
 typedef enum {
     S_STARTUP, S_VIEW, S_PARK, S_REMOVE,
-    S_UPDATE,  S_SEARCH, S_SUMMARY, S_REPORTS, S_SETTINGS, S_ADD, S_FILE,
+    S_SEARCH, S_REPORTS, S_SETTINGS, S_ADD,
     S_ROLE_SELECT, S_ADMIN_LOGIN
 } Screen;
 
@@ -58,12 +58,12 @@ static struct {
 
     // text field buffers (plain char arrays — raygui reads these directly)
     char f_start[FLEN], f_plate[FLEN], f_type[FLEN];
-    char f_search[FLEN], f_addslots[FLEN], f_uid[FLEN], f_uplate[FLEN], f_utype[FLEN];
+    char f_search[FLEN], f_addslots[FLEN];
     char f_username[FLEN], f_password[FLEN];
     char f_rep_day[FLEN], f_rep_month[FLEN], f_rep_year[FLEN];
     char f_set_user[FLEN], f_set_pass[FLEN], f_set_r0[FLEN], f_set_r1[FLEN], f_set_r2[FLEN];
 
-    int sel_slot, sel_size, upd_size, search_mode, search_idx;
+    int sel_slot, sel_size, search_mode, search_idx;
     char  msg[128];
     Color msg_col;
     int   scroll, lscroll;
@@ -338,16 +338,14 @@ static void draw_nav(Vector2 m) {
 
     const char *labels[] = {
         "View All","Park Vehicle","Checkout",
-        "Update Info","Search","Summary",
-        "Reports","Settings","Add Slots","Save / Load"
+        "Search","Reports","Settings","Add Slots"
     };
     Screen screens[] = {
         S_VIEW,S_PARK,S_REMOVE,
-        S_UPDATE,S_SEARCH,S_SUMMARY,
-        S_REPORTS,S_SETTINGS,S_ADD,S_FILE
+        S_SEARCH,S_REPORTS,S_SETTINGS,S_ADD
     };
 
-    int show_count = (ui.role == 2) ? 10 : 3;
+    int show_count = (ui.role == 2) ? 7 : 3;
     for (int i = 0; i < show_count; i++) {
         Rectangle r = {5, TOP_H+8+i*52, NAV_W-10, 44};
         int active = (ui.scr == screens[i]);
@@ -372,7 +370,7 @@ static void draw_nav(Vector2 m) {
         char serr[128] = ""; save_file(serr);  // auto-save on logout
         ui.role = 0; ui.started = 0;
         ui.scr = S_ROLE_SELECT;
-        ui.active = 0; ui.sel_slot = -1; ui.sel_size = -1; ui.upd_size = -1;
+        ui.active = 0; ui.sel_slot = -1; ui.sel_size = -1;
         ui.scroll = 0; ui.lscroll = 0;
         msg_set("", WHITE);
     }
@@ -536,57 +534,6 @@ static void draw_remove(Vector2 m) {
     DrawText(ui.msg, fx, fy, 13, ui.msg_col);
 }
 
-// ── SCREEN: UPDATE INFO ──────────────────────────────────────────────
-
-static void draw_update(Vector2 m) {
-    (void)m;
-    int x = CON_X+20, y = CON_Y+15;
-    draw_heading(x, y, "Update Vehicle Info");  y += 40;
-
-    inp((Rectangle){x, y+18, 150, 32}, ui.f_uid, 8, "Slot ID");
-    if (btn((Rectangle){x+160, y+18, 90, 32}, "Load", C_BLU)) {
-        int id = atoi(ui.f_uid), idx = find_slot(id);
-        if (idx < 0)               msg_set("Slot not found", C_RED);
-        else if (!lot[idx].occupied) msg_set("Slot is empty", C_RED);
-        else {
-            strncpy(ui.f_uplate, lot[idx].v.plate, FLEN-1);
-            strncpy(ui.f_utype,  lot[idx].v.type,  FLEN-1);
-            ui.upd_size = lot[idx].v.size;
-            ui.sel_slot = id; msg_set("", WHITE);
-        }
-    }
-    y += 68;
-
-    if (ui.sel_slot <= 0) {
-        DrawText("Enter a slot ID and click Load.", x, y, 14, C_DIM); return;
-    }
-    DrawText("Edit fields below (clear a field to keep its current value).",
-             x, y, 12, C_DIM);  y += 28;
-
-    inp((Rectangle){x, y+18, 270, 32}, ui.f_uplate, 9,  "Plate"); y += 68;
-    inp((Rectangle){x, y+18, 270, 32}, ui.f_utype,  10, "Type");  y += 68;
-
-    int upd_inf = infer_size(ui.f_utype);
-    if (upd_inf >= 0) ui.upd_size = upd_inf;
-
-    DrawText("Size", x, y, 12, C_SUB);  y += 18;
-    size_buttons(x, y, &ui.upd_size);
-    y += 48;
-
-    if (btn((Rectangle){x, y, 200, 42}, "SAVE CHANGES", C_GRN)) {
-        char err[128] = "";
-        if (update_car(ui.sel_slot, ui.f_uplate, ui.f_utype, ui.upd_size, err)) {
-            msg_set("Updated successfully!", (Color){60,220,100,255});
-            ui.sel_slot = -1; ui.active = 0;
-            ui.f_uid[0] = ui.f_uplate[0] = ui.f_utype[0] = '\0';
-        } else {
-            msg_set(err, C_RED);
-        }
-    }
-    y += 52;
-    DrawText(ui.msg, x, y, 13, ui.msg_col);
-}
-
 // ── SCREEN: SEARCH ───────────────────────────────────────────────────
 
 static void draw_search(Vector2 m) {
@@ -621,39 +568,6 @@ static void draw_search(Vector2 m) {
     }
 }
 
-// ── SCREEN: SUMMARY ──────────────────────────────────────────────────
-
-static void draw_summary(void) {
-    int x = CON_X+20, y = CON_Y+20;
-    draw_heading(x, y, "Summary");  y += 44;
-
-    int occ = 0, sm = 0, med = 0, big = 0;
-    for (int i = 0; i < num_slots; i++) {
-        if (!lot[i].occupied) continue;
-        occ++;
-        if      (lot[i].v.size == 0) sm++;
-        else if (lot[i].v.size == 1) med++;
-        else                         big++;
-    }
-
-    char s[32];
-    sprintf(s, "%d", num_slots);    draw_card(x,     y, 195, 76, "TOTAL SLOTS",  s, C_CARD);
-    sprintf(s, "%d", occ);          draw_card(x+205, y, 195, 76, "OCCUPIED",     s, C_RED);
-    sprintf(s, "%d", num_slots-occ);draw_card(x+410, y, 195, 76, "AVAILABLE",    s, C_GRN);
-    sprintf(s, "$%.2f", income);    draw_card(x+615, y, 210, 76, "TOTAL INCOME", s, (Color){130,85,15,255});
-    y += 96;
-
-    DrawText("Breakdown of occupied slots by size:", x, y, 13, C_SUB); y += 26;
-    sprintf(s, "Small  : %d", sm);  DrawText(s, x, y, 14, WHITE); y += 22;
-    sprintf(s, "Medium : %d", med); DrawText(s, x, y, 14, WHITE); y += 22;
-    sprintf(s, "Big    : %d", big); DrawText(s, x, y, 14, WHITE); y += 32;
-    DrawText("Fee rates per hour:", x, y, 13, C_SUB); y += 24;
-    char r[48];
-    sprintf(r, "Small  : $%.2f / hr", fee_rates[0]); DrawText(r, x, y, 13, C_DIM); y += 20;
-    sprintf(r, "Medium : $%.2f / hr", fee_rates[1]); DrawText(r, x, y, 13, C_DIM); y += 20;
-    sprintf(r, "Big    : $%.2f / hr", fee_rates[2]); DrawText(r, x, y, 13, C_DIM);
-}
-
 // ── SCREEN: ADD SLOTS ────────────────────────────────────────────────
 
 static void draw_add_slots(void) {
@@ -674,31 +588,6 @@ static void draw_add_slots(void) {
         }
     }
     y += 54;
-    DrawText(ui.msg, x, y, 13, ui.msg_col);
-}
-
-// ── SCREEN: SAVE / LOAD ──────────────────────────────────────────────
-
-static void draw_file(void) {
-    int x = CON_X+20, y = CON_Y+20;
-    draw_heading(x, y, "Save & Load Data");  y += 50;
-    DrawText("File:  parking_data.txt", x, y, 13, C_DIM);  y += 34;
-    if (btn((Rectangle){x, y, 290, 52}, "SAVE DATA TO FILE", C_GRN)) {
-        char err[128] = "";
-        if (save_file(err)) msg_set("Saved to parking_data.txt", (Color){60,220,100,255});
-        else                msg_set(err, C_RED);
-    }
-    y += 68;
-    if (btn((Rectangle){x, y, 290, 52}, "LOAD DATA FROM FILE", C_BLU)) {
-        char err[128] = "";
-        if (load_file(err)) {
-            msg_set("Data loaded successfully!", (Color){60,220,100,255});
-            ui.scroll = ui.lscroll = 0;
-        } else {
-            msg_set(err, C_RED);
-        }
-    }
-    y += 68;
     DrawText(ui.msg, x, y, 13, ui.msg_col);
 }
 
@@ -1018,13 +907,10 @@ void ui_draw(void) {
         case S_VIEW:     draw_view_all(m);  break;
         case S_PARK:     draw_park(m);      break;
         case S_REMOVE:   draw_remove(m);    break;
-        case S_UPDATE:   draw_update(m);    break;
         case S_SEARCH:   draw_search(m);    break;
-        case S_SUMMARY:  draw_summary();    break;
         case S_REPORTS:  draw_reports(m);   break;
         case S_SETTINGS: draw_settings();   break;
         case S_ADD:      draw_add_slots();  break;
-        case S_FILE:     draw_file();       break;
 default: break;
     }
 }
