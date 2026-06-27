@@ -529,9 +529,9 @@ static void draw_remove(Vector2 m) {
         if (btn((Rectangle){fx+120, fy-4, 110, 36}, "CONFIRM", C_RED)) {
             char err[128] = ""; double fee; int hours;
             if (remove_car(ui.sel_slot, &fee, &hours, err)) {
-                char ok[80];
-                snprintf(ok, sizeof(ok), "Removed!  %d hr    Fee: $%.2f    Total: $%.2f",
-                        hours, fee, income);
+                char ok[96];
+                snprintf(ok, sizeof(ok), "Removed!  %dh %02dm %02ds    Fee: $%.2f    Total: $%.2f",
+                        d_h, d_m, d_s, fee, income);
                 msg_set(ok, (Color){60,220,100,255});
                 ui.sel_slot = -1; ui.active = 0; ui.confirm_remove = 0;
             } else {
@@ -649,16 +649,16 @@ static void draw_startup(void) {
             }
         }
         DrawText("- or start a new lot (Small / Medium / Big) -", bx+20, by+142, 12, C_DIM);
-        inp((Rectangle){bx+20,  by+174, 85, 34}, ui.f_small_n,  22, "Small");
-        inp((Rectangle){bx+115, by+174, 85, 34}, ui.f_medium_n, 23, "Medium");
-        inp((Rectangle){bx+210, by+174, 85, 34}, ui.f_big_n,    24, "Big");
+        inp((Rectangle){bx+20,  by+174, 85, 34}, ui.f_small_n,  25, "Small");
+        inp((Rectangle){bx+115, by+174, 85, 34}, ui.f_medium_n, 26, "Medium");
+        inp((Rectangle){bx+210, by+174, 85, 34}, ui.f_big_n,    27, "Big");
         if (btn((Rectangle){bx+310, by+174, 100, 34}, "CREATE", C_BLU))
             create_lot_from_fields();
     } else {
         DrawText("Enter slot counts (Small / Medium / Big):", bx+20, by+54, 13, C_SUB);
-        inp((Rectangle){bx+20,  by+90, 85, 36}, ui.f_small_n,  22, "Small");
-        inp((Rectangle){bx+115, by+90, 85, 36}, ui.f_medium_n, 23, "Medium");
-        inp((Rectangle){bx+210, by+90, 85, 36}, ui.f_big_n,    24, "Big");
+        inp((Rectangle){bx+20,  by+90, 85, 36}, ui.f_small_n,  25, "Small");
+        inp((Rectangle){bx+115, by+90, 85, 36}, ui.f_medium_n, 26, "Medium");
+        inp((Rectangle){bx+210, by+90, 85, 36}, ui.f_big_n,    27, "Big");
         if (btn((Rectangle){bx+310, by+90, 110, 36}, "CREATE", C_BLU) || IsKeyPressed(KEY_ENTER))
             create_lot_from_fields();
     }
@@ -928,7 +928,17 @@ void ui_init(void) {
 
     FILE *cf = fopen("admin.cfg", "r");
     if (cf) {
-        fscanf(cf, "%63s %63s", ui.admin_user, ui.admin_pass);
+        char line[128];
+        if (fgets(line, sizeof(line), cf)) {
+            line[strcspn(line, "\n")] = '\0';
+            strncpy(ui.admin_user, line, 63);
+            ui.admin_user[63] = '\0';
+        }
+        if (fgets(line, sizeof(line), cf)) {
+            line[strcspn(line, "\n")] = '\0';
+            strncpy(ui.admin_pass, line, 63);
+            ui.admin_pass[63] = '\0';
+        }
         fclose(cf);
     } else {
         strncpy(ui.admin_user, "admin", 63);

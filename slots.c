@@ -15,6 +15,7 @@ double        daily_cap[3]  = {8.0, 16.0, 24.0};
 void init_lot(int n) {
     free(lot);
     lot = malloc(n * sizeof(struct Slot));
+    if (!lot) { num_slots = 0; return; }
     memset(lot, 0, n * sizeof(struct Slot));
     num_slots = n;
     for (int i = 0; i < n; i++) {

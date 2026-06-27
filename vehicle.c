@@ -122,7 +122,7 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     income += fee;
 
     char rerr[128] = "";
-    if (!append_report(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday,
+    if (!append_report(v->entry_year, v->entry_month, v->entry_day,
                        v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr)) {
         fprintf(stderr, "report write failed: %s\n", rerr);
     }
