@@ -51,7 +51,7 @@ int  find_best_slot(int size);
 // vehicle.c
 int    park_car(int slot_id, const char *plate, const char *type,
                 int size, char *err);
-int    remove_car(int slot_id, double *fee_out, int *hours_out, char *err);
+int    remove_car(int slot_id, int exit_h, int exit_m, int exit_s, double *fee_out, int *hours_out, char *err);
 double calc_fee(int size, int hours);
 time_t vehicle_entry_time(const struct Vehicle *v);
 

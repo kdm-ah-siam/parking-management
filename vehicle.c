@@ -96,7 +96,7 @@ int park_car(int slot_id, const char *plate, const char *type, int size, char *e
     return 1;
 }
 
-int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
+int remove_car(int slot_id, int exit_h, int exit_m, int exit_s, double *fee_out, int *hours_out, char *err) {
     int i = find_slot(slot_id);
     if (i < 0) {
         strcpy(err, "Slot not found");
@@ -110,10 +110,18 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
     struct Vehicle *v = &lot[i].v;
 
     time_t entry_t = vehicle_entry_time(v);
-    time_t now_t = time(NULL);
-    struct tm today = *localtime(&now_t);
+    time_t now_ref = time(NULL);
+    struct tm exit_tm = *localtime(&now_ref);
+    exit_tm.tm_hour = exit_h;
+    exit_tm.tm_min  = exit_m;
+    exit_tm.tm_sec  = exit_s;
+    exit_tm.tm_isdst = -1;
+    time_t exit_t = mktime(&exit_tm);
+    if (exit_t < entry_t) exit_t += 86400;
 
-    int hours = (int)(difftime(now_t, entry_t) / 3600.0);
+    int total_sec = (int)difftime(exit_t, entry_t);
+    if (total_sec < 0) total_sec = 0;
+    int hours = total_sec / 3600;
     if (hours <= 0) hours = 1;
 
     double fee = calc_fee(v->size, hours);
@@ -123,7 +131,7 @@ int remove_car(int slot_id, double *fee_out, int *hours_out, char *err) {
 
     char rerr[128] = "";
     if (!append_report(v->entry_year, v->entry_month, v->entry_day,
-                       v->entry_hour, today.tm_hour, v->plate, v->type, v->size, hours, fee, rerr)) {
+                       v->entry_hour, exit_h, v->plate, v->type, v->size, hours, fee, rerr)) {
         fprintf(stderr, "report write failed: %s\n", rerr);
     }
 

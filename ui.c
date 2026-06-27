@@ -64,6 +64,7 @@ static struct {
     char f_set_user[FLEN], f_set_pass[FLEN], f_set_r0[FLEN], f_set_r1[FLEN], f_set_r2[FLEN];
     char f_set_dc0[FLEN], f_set_dc1[FLEN], f_set_dc2[FLEN];
     char f_small_n[FLEN], f_medium_n[FLEN], f_big_n[FLEN];
+    char f_exit_h[FLEN], f_exit_m[FLEN], f_exit_s[FLEN];
     int  add_size;
 
     int sel_slot, sel_size, search_mode, search_idx;
@@ -481,16 +482,18 @@ static void draw_remove(Vector2 m) {
 
     struct Vehicle *v = &lot[idx].v;
 
-    // cache entry_t per slot — mktime is non-trivial, no need to call it every frame
+    // cache entry_t per slot; also pre-fill exit time fields on slot change
     static int    cached_slot = -1;
     static time_t cached_entry_t = 0;
     if (ui.sel_slot != cached_slot) {
         cached_entry_t = vehicle_entry_time(v);
         cached_slot    = ui.sel_slot;
+        time_t now_t = time(NULL);
+        struct tm *now_tm = localtime(&now_t);
+        snprintf(ui.f_exit_h, FLEN, "%02d", now_tm->tm_hour);
+        snprintf(ui.f_exit_m, FLEN, "%02d", now_tm->tm_min);
+        snprintf(ui.f_exit_s, FLEN, "%02d", now_tm->tm_sec);
     }
-
-    time_t now_t = time(NULL);
-    struct tm now_tm = *localtime(&now_t);
 
     char buf[64];
     DrawText("Parked vehicle:", fx, fy, 13, C_SUB);  fy += 22;
@@ -499,10 +502,28 @@ static void draw_remove(Vector2 m) {
     snprintf(buf, sizeof(buf), "Size  : %s", SIZE_NAMES[v->size]); DrawText(buf, fx, fy, 14, WHITE); fy += 22;
     snprintf(buf, sizeof(buf), "Entry : %02d:%02d:%02d", v->entry_hour, v->entry_min, v->entry_sec);
     DrawText(buf, fx, fy, 14, WHITE); fy += 30;
-    snprintf(buf, sizeof(buf), "Now   : %02d:%02d:%02d", now_tm.tm_hour, now_tm.tm_min, now_tm.tm_sec);
-    DrawText(buf, fx, fy, 14, (Color){80,160,255,255}); fy += 26;
 
-    int total_sec = (int)difftime(now_t, cached_entry_t);
+    DrawText("Exit Time  (HH : MM : SS)", fx, fy, 12, C_SUB);  fy += 18;
+    inp((Rectangle){fx,      fy, 52, 30}, ui.f_exit_h, 28, NULL);
+    DrawText(":", fx+57, fy+7, 16, WHITE);
+    inp((Rectangle){fx+65,   fy, 52, 30}, ui.f_exit_m, 29, NULL);
+    DrawText(":", fx+122, fy+7, 16, WHITE);
+    inp((Rectangle){fx+130,  fy, 52, 30}, ui.f_exit_s, 30, NULL);
+    fy += 42;
+
+    int eh = atoi(ui.f_exit_h), em = atoi(ui.f_exit_m), es = atoi(ui.f_exit_s);
+    if (eh < 0) eh = 0; if (eh > 23) eh = 23;
+    if (em < 0) em = 0; if (em > 59) em = 59;
+    if (es < 0) es = 0; if (es > 59) es = 59;
+
+    time_t now_ref = time(NULL);
+    struct tm exit_tm = *localtime(&now_ref);
+    exit_tm.tm_hour = eh; exit_tm.tm_min = em; exit_tm.tm_sec = es;
+    exit_tm.tm_isdst = -1;
+    time_t exit_t = mktime(&exit_tm);
+    if (exit_t < cached_entry_t) exit_t += 86400;
+
+    int total_sec = (int)difftime(exit_t, cached_entry_t);
     if (total_sec < 0) total_sec = 0;
     int d_h = total_sec / 3600;
     int d_m = (total_sec % 3600) / 60;
@@ -528,7 +549,7 @@ static void draw_remove(Vector2 m) {
         DrawText("Are you sure?", fx, fy-2, 14, (Color){255,200,50,255});
         if (btn((Rectangle){fx+120, fy-4, 110, 36}, "CONFIRM", C_RED)) {
             char err[128] = ""; double fee; int hours;
-            if (remove_car(ui.sel_slot, &fee, &hours, err)) {
+            if (remove_car(ui.sel_slot, eh, em, es, &fee, &hours, err)) {
                 char ok[96];
                 snprintf(ok, sizeof(ok), "Removed!  %dh %02dm %02ds    Fee: $%.2f    Total: $%.2f",
                         d_h, d_m, d_s, fee, income);
