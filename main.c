@@ -22,6 +22,7 @@ int main(void) {
         EndDrawing();
     }
 
+    if (num_slots > 0) { char serr[128] = ""; save_file(serr); }
     CloseWindow();
     free(lot);
     return 0;

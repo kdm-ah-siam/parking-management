@@ -75,6 +75,7 @@ static struct {
     char  admin_user[64], admin_pass[64];
     int   report_mode;
     int   confirm_remove, confirm_slot_id;
+    int   confirm_create;
 } ui;
 
 // ── small helpers ─────────────────────────────────────────────────────
@@ -374,7 +375,8 @@ static void draw_nav(Vector2 m) {
     }
 
     if (btn((Rectangle){5, SCR_H-52, NAV_W-10, 44}, "LOGOUT", C_RED)) {
-        char serr[128] = ""; save_file(serr);  // auto-save on logout
+        char serr[128] = "";
+        if (save_file(serr)) ui.has_file = 1;
         ui.role = 0; ui.started = 0;
         ui.scr = S_ROLE_SELECT;
         ui.active = 0; ui.sel_slot = -1; ui.sel_size = -1;
@@ -452,6 +454,8 @@ static void draw_park(Vector2 m) {
                     msg_set(ok, (Color){60,220,100,255});
                     ui.f_plate[0] = ui.f_type[0] = '\0';
                     ui.sel_size = -1; ui.active = 0;
+                    char serr[128] = ""; save_file(serr);
+                    if (serr[0]) ui.has_file = 0; else ui.has_file = 1;
                 } else {
                     msg_set(err, C_RED);
                 }
@@ -555,6 +559,8 @@ static void draw_remove(Vector2 m) {
                         d_h, d_m, d_s, fee, income);
                 msg_set(ok, (Color){60,220,100,255});
                 ui.sel_slot = -1; ui.active = 0; ui.confirm_remove = 0;
+                char serr[128] = ""; save_file(serr);
+                if (serr[0]) ui.has_file = 0; else ui.has_file = 1;
             } else {
                 msg_set(err, C_RED); ui.confirm_remove = 0;
             }
@@ -673,8 +679,16 @@ static void draw_startup(void) {
         inp((Rectangle){bx+20,  by+174, 85, 34}, ui.f_small_n,  25, "Small");
         inp((Rectangle){bx+115, by+174, 85, 34}, ui.f_medium_n, 26, "Medium");
         inp((Rectangle){bx+210, by+174, 85, 34}, ui.f_big_n,    27, "Big");
-        if (btn((Rectangle){bx+310, by+174, 100, 34}, "CREATE", C_BLU))
-            create_lot_from_fields();
+        if (!ui.confirm_create) {
+            if (btn((Rectangle){bx+310, by+174, 100, 34}, "CREATE", C_BLU))
+                ui.confirm_create = 1;
+        } else {
+            DrawText("Overwrite existing data?", bx+20, by+216, 12, (Color){255,200,50,255});
+            if (btn((Rectangle){bx+20,  by+232, 80, 28}, "YES", C_RED))
+                create_lot_from_fields();
+            if (btn((Rectangle){bx+108, by+232, 80, 28}, "CANCEL", C_INP))
+                ui.confirm_create = 0;
+        }
     } else {
         DrawText("Enter slot counts (Small / Medium / Big):", bx+20, by+54, 13, C_SUB);
         inp((Rectangle){bx+20,  by+90, 85, 36}, ui.f_small_n,  25, "Small");
@@ -685,6 +699,7 @@ static void draw_startup(void) {
     }
     if (btn((Rectangle){bx+20, by+bh-50, 90, 30}, "BACK", C_INP)) {
         ui.scr = S_ROLE_SELECT; ui.active = 0;
+        ui.confirm_create = 0;
         msg_set("", WHITE);
     }
     DrawText(ui.msg, bx+120, by+bh-44, 12, ui.msg_col);
@@ -886,7 +901,10 @@ static void draw_role_select(void) {
     }
     if (btn((Rectangle){bx+265, by+90, 215, 46}, "USER", C_GRN)) {
         ui.role = 1;
-        if (ui.has_file) {
+        if (!ui.has_file) {
+            msg_set("No parking data found. Admin must create the lot first.", C_RED);
+            ui.role = 0;
+        } else {
             char err[128] = "";
             if (load_file(err)) {
                 ui.started = 1; ui.scr = S_VIEW;
@@ -896,11 +914,12 @@ static void draw_role_select(void) {
                 snprintf(ui.f_set_dc0, FLEN, "%.2f", daily_cap[0]);
                 snprintf(ui.f_set_dc1, FLEN, "%.2f", daily_cap[1]);
                 snprintf(ui.f_set_dc2, FLEN, "%.2f", daily_cap[2]);
-            } else { ui.scr = S_STARTUP; ui.active = 1; }
-        } else {
-            ui.scr = S_STARTUP; ui.active = 1;
+                msg_set("", WHITE);
+            } else {
+                msg_set(err[0] ? err : "Failed to load parking data.", C_RED);
+                ui.role = 0;
+            }
         }
-        msg_set("", WHITE);
     }
     DrawText(ui.msg, bx+20, by+bh-24, 12, ui.msg_col);
 }
