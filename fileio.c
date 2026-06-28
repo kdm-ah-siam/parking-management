@@ -53,15 +53,9 @@ int load_file(char *err) {
         return 0;
     }
 
-    double fr0, fr1, fr2, dc0, dc1, dc2;
-    if (fscanf(f, " %lf %lf %lf %lf %lf %lf", &fr0, &fr1, &fr2, &dc0, &dc1, &dc2) == 6) {
-        fee_rates[0] = fr0;
-        fee_rates[1] = fr1;
-        fee_rates[2] = fr2;
-        daily_cap[0] = dc0;
-        daily_cap[1] = dc1;
-        daily_cap[2] = dc2;
-    }
+    fscanf(f, " %lf %lf %lf %lf %lf %lf",
+        &fee_rates[0], &fee_rates[1], &fee_rates[2],
+        &daily_cap[0], &daily_cap[1], &daily_cap[2]);
 
     init_lot(n);
     income = inc;
