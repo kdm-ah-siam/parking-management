@@ -1,0 +1,14 @@
+# compiled objects and binaries
+*.o
+parking_gui
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# data files (runtime generated)
+parking_data.txt
+reports.txt
+reports_export.csv
