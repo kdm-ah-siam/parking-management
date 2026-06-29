@@ -56,7 +56,7 @@ int load_file(char *err) {
     fscanf(f, " %lf %lf %lf %lf %lf %lf",
         &fee_rates[0], &fee_rates[1], &fee_rates[2],
         &daily_cap[0], &daily_cap[1], &daily_cap[2]);
-
+        
     init_lot(n);
     income = inc;
 
