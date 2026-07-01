@@ -1,10 +1,10 @@
-// vehicle.c
+// system-logic.c
 
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <time.h>
-#include "parking.h"
+#include "function-define.h"
 
 double calc_fee(int size, int hours) {
     double fee = hours * fee_rates[size];

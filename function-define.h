@@ -1,5 +1,5 @@
-#ifndef PARKING_H
-#define PARKING_H
+#ifndef FUNCTION_DEFINE_H
+#define FUNCTION_DEFINE_H
 
 #include <time.h>
 
@@ -41,21 +41,21 @@ extern const char   *SIZE_NAMES[3];
 extern double        fee_rates[3];
 extern double        daily_cap[3];
 
-// slots.c
+// slot-management.c
 void init_lot(int n);
 void add_slots_n(int n, int slot_size);
 int  find_slot(int id);
 int  find_plate(const char *plate);
 int  find_best_slot(int size);
 
-// vehicle.c
+// system-logic.c
 int    park_car(int slot_id, const char *plate, const char *type,
                 int size, char *err);
 int    remove_car(int slot_id, int exit_h, int exit_m, int exit_s, double *fee_out, int *hours_out, char *err);
 double calc_fee(int size, int hours);
 time_t vehicle_entry_time(const struct Vehicle *v);
 
-// fileio.c
+// file-saving.c
 int save_file(char *err);
 int load_file(char *err);
 int append_report(int year, int month, int day,

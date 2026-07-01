@@ -1,9 +1,9 @@
-// slots.c
+// slot-management.c
 
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "parking.h"
+#include "function-define.h"
 
 struct Slot  *lot       = NULL;
 int           num_slots = 0;
